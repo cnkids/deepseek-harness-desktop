@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -47,7 +48,21 @@ function option(name) {
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare the resolved entry path instead of string-concatenating a file://
+// URL: the old form silently skipped the CLI on Windows drive letters and on
+// paths needing percent-encoding. import.meta.filename is already fully
+// resolved (macOS reveals /var -> /private/var), so resolve argv[1] too.
+function isCliEntryPath(value) {
+  if (!value) return false
+  try {
+    return import.meta.filename === realpathSync(value)
+  } catch {
+    return false
+  }
+}
+
+const isCliEntry = isCliEntryPath(process.argv[1])
+if (isCliEntry) {
   const args = {
     input: option('--input'),
     output: option('--output'),

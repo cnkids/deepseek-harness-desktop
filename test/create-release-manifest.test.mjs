@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { createReleaseManifest } from '../scripts/create-release-manifest.mjs'
+
+const scriptPath = fileURLToPath(
+  new URL('../scripts/create-release-manifest.mjs', import.meta.url),
+)
 
 test('creates a stable manifest for supported release assets', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'dsh-release-'))
@@ -39,4 +45,49 @@ test('rejects releases without installable assets', async () => {
     }),
     /No release assets/,
   )
+})
+
+test('CLI entry detection works from a path containing spaces', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('creating symlinks needs elevated rights on Windows')
+    return
+  }
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-release-cli-'))
+  const spaceDir = path.join(root, 'space dir')
+  const binDir = path.join(spaceDir, 'scripts')
+  const inputDir = path.join(spaceDir, 'input')
+  const outputFile = path.join(spaceDir, 'latest.json')
+  try {
+    await mkdir(binDir, { recursive: true })
+    await mkdir(inputDir, { recursive: true })
+    await writeFile(path.join(inputDir, 'app.dmg'), 'dmg')
+    await copyFile(scriptPath, path.join(binDir, 'create-release-manifest.mjs'))
+    await symlink(
+      fileURLToPath(new URL('../node_modules', import.meta.url)),
+      path.join(spaceDir, 'node_modules'),
+      'dir',
+    )
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(binDir, 'create-release-manifest.mjs'),
+        '--input',
+        inputDir,
+        '--output',
+        outputFile,
+        '--version',
+        '9.9.9',
+        '--base-url',
+        'https://downloads.example.com',
+      ],
+      { encoding: 'utf8' },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    const manifest = JSON.parse(await readFile(outputFile, 'utf8'))
+    assert.equal(manifest.version, '9.9.9')
+    assert.equal(manifest.assets.length, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

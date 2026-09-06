@@ -6,11 +6,13 @@ import { test } from 'node:test'
 import {
   MANAGED_NODE_VERSION,
   REQUIRED_NODE_RANGE,
+  downloadArchive,
   findInstalledManagedNode,
   getNodeArtifact,
   inspectNodeInstallation,
   isCompatibleNodeVersion,
   resolveNodeEnvironment,
+  validateTarEntry,
   validateZipEntry,
 } from '../src/node-runtime.mjs'
 
@@ -132,5 +134,67 @@ test('keeps an explicit Node override ahead of a cached managed runtime', async 
     if (previousOverride === undefined) delete process.env.DSH_DESKTOP_NODE
     else process.env.DSH_DESKTOP_NODE = previousOverride
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects tar path traversal, absolute paths, links, and device entries', () => {
+  const fileEntry = { type: 'File' }
+  assert.equal(validateTarEntry('node-v24/bin/node', fileEntry), true)
+  assert.equal(validateTarEntry('node-v24/lib/node_modules/npm/bin/npx-cli.js', fileEntry), true)
+  assert.throws(() => validateTarEntry('../escape', fileEntry), /不安全路径/)
+  assert.throws(() => validateTarEntry('/absolute/path', fileEntry), /不安全路径/)
+  assert.throws(() => validateTarEntry('C:\\escape\\node.exe', fileEntry), /不安全路径/)
+  for (const type of ['SymbolicLink', 'Link', 'CharacterDevice', 'BlockDevice', 'FIFO']) {
+    assert.throws(
+      () => validateTarEntry('node-v24/bin/node', { type }),
+      /不允许的条目类型/,
+      type,
+    )
+  }
+})
+
+test('downloadArchive fails fast when the remote never answers', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'node-archive-timeout-'))
+  const destination = path.join(directory, 'node.tar.gz')
+  try {
+    const fetchImpl = (_url, { signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'TimeoutError'))
+        })
+      })
+    await assert.rejects(
+      downloadArchive(
+        'https://nodejs.example/node.tar.gz',
+        destination,
+        fetchImpl,
+        undefined,
+        80,
+      ),
+      /超时/,
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('downloadArchive aborts a stalled response body', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'node-archive-body-timeout-'))
+  const destination = path.join(directory, 'node.tar.gz')
+  try {
+    const fetchImpl = async () =>
+      new Response(new ReadableStream({ start() { /* never emits data */ } }))
+    await assert.rejects(
+      downloadArchive(
+        'https://nodejs.example/node.tar.gz',
+        destination,
+        fetchImpl,
+        undefined,
+        80,
+      ),
+      /超时/,
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
   }
 })

@@ -20,15 +20,16 @@ window.requestAnimationFrame(() => {
 function resolveStage(status) {
   const text = `${status.message || ''} ${status.detail || ''}`
   if (/已启动|界面|等待 Harness|本地端口|Web UI/i.test(text)) return 3
-  if (/准备 DeepSeek Harness|安装 DeepSeek Harness|更新 DeepSeek Harness|插件|依赖/i.test(text)) return 2
+  if (/DeepSeek Harness 已就绪|准备 DeepSeek Harness|安装 DeepSeek Harness|更新 DeepSeek Harness|插件|依赖/i.test(text)) return 2
   if (/Harness 更新|npm 官方|版本|联网检查/i.test(text)) return 1
   return 0
 }
 
 function updateStages(currentStage, status) {
+  const finishedMessage = /已启动|已就绪/.test(status.message || '')
   stages.forEach((stage, index) => {
     const isCurrent = index === currentStage
-    const isComplete = index < currentStage || (/已启动/.test(status.message || '') && index <= currentStage)
+    const isComplete = index < currentStage || (finishedMessage && index <= currentStage)
     const state = stage.querySelector('.stage-state')
 
     stage.classList.toggle('is-current', isCurrent && !isComplete)
@@ -71,8 +72,14 @@ if (window.desktopRuntime) {
 
   retry.addEventListener('click', async () => {
     retry.disabled = true
-    await window.desktopRuntime.retry()
-    retry.disabled = false
+    try {
+      await window.desktopRuntime.retry()
+    } catch {
+      // The restart channel rejected the request (for example when the page
+      // no longer matches the trusted loading URL); keep the button usable.
+    } finally {
+      retry.disabled = false
+    }
   })
 } else {
   const demoState = new URLSearchParams(window.location.search).get('demo')

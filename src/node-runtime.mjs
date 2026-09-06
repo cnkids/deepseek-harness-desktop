@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import {
   access,
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   realpath,
@@ -23,6 +24,15 @@ const execFileAsync = promisify(execFile)
 export const REQUIRED_NODE_RANGE = '^22.19.0 || >=24.0.0'
 export const MANAGED_NODE_VERSION = '24.12.0'
 export const NODE_DIST_BASE_URL = `https://nodejs.org/dist/v${MANAGED_NODE_VERSION}`
+export const NODE_DOWNLOAD_TIMEOUT_MS = 10 * 60_000
+
+const UNSAFE_TAR_ENTRY_TYPES = new Set([
+  'SymbolicLink',
+  'Link',
+  'CharacterDevice',
+  'BlockDevice',
+  'FIFO',
+])
 
 const NODE_ARTIFACTS = Object.freeze({
   'darwin-arm64': {
@@ -192,8 +202,24 @@ async function sha256File(filePath) {
   return hash.digest('hex')
 }
 
-async function downloadArchive(url, destination, fetchImpl, onProgress) {
-  const response = await fetchImpl(url, { redirect: 'follow' })
+export async function downloadArchive(
+  url,
+  destination,
+  fetchImpl,
+  onProgress,
+  timeoutMs = NODE_DOWNLOAD_TIMEOUT_MS,
+) {
+  const signal = AbortSignal.timeout(timeoutMs)
+  let response
+  try {
+    response = await fetchImpl(url, { redirect: 'follow', signal })
+  } catch (error) {
+    throw new Error(
+      error?.name === 'TimeoutError' || error?.name === 'AbortError'
+        ? `下载 Node.js 超时(超过 ${Math.round(timeoutMs / 60_000)} 分钟),请检查网络后重试。`
+        : `下载 Node.js 失败：${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
   if (!response.ok || !response.body) {
     throw new Error(`下载 Node.js 失败：HTTP ${response.status}`)
   }
@@ -204,13 +230,52 @@ async function downloadArchive(url, destination, fetchImpl, onProgress) {
     received += chunk.length
     onProgress?.({ phase: 'download', received, total })
   })
-  await pipeline(source, createWriteStream(destination, { flags: 'wx' }))
+  try {
+    await pipeline(source, createWriteStream(destination, { flags: 'wx' }), { signal })
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      throw new Error(`下载 Node.js 超时(超过 ${Math.round(timeoutMs / 60_000)} 分钟),请检查网络后重试。`)
+    }
+    throw error
+  }
+}
+
+export function validateTarEntry(entryName, entry) {
+  const normalized = entryName.replaceAll('\\', '/')
+  if (
+    normalized.startsWith('/') ||
+    /^[a-zA-Z]:/.test(normalized) ||
+    normalized.split('/').includes('..')
+  ) {
+    throw new Error(`Node.js 归档包含不安全路径：${entryName}`)
+  }
+  if (UNSAFE_TAR_ENTRY_TYPES.has(entry?.type)) {
+    throw new Error(`Node.js 归档包含不允许的条目类型(${entry.type})：${entryName}`)
+  }
+  return true
 }
 
 async function extractArchive(artifact, archivePath, extractDir) {
   await mkdir(extractDir, { recursive: true })
   if (artifact.archive === 'tar.gz') {
-    await tar.x({ file: archivePath, cwd: extractDir, strip: 1 })
+    let rejected = 0
+    await tar.x({
+      file: archivePath,
+      cwd: extractDir,
+      strip: 1,
+      filter: (entryPath, entry) => {
+        try {
+          validateTarEntry(entryPath, entry)
+          return true
+        } catch {
+          rejected += 1
+          return false
+        }
+      },
+    })
+    if (rejected > 0) {
+      throw new Error(`Node.js 归档包含 ${rejected} 个不安全条目,已中止安装。`)
+    }
     return extractDir
   }
 
@@ -304,7 +369,13 @@ async function assertManagedRuntime(runtimeDir, platform = process.platform) {
   if (!(await fileExists(nodePath)) || !(await fileExists(npxCliPath))) {
     throw new Error('下载的 Node.js 运行时不完整。')
   }
-  if (platform !== 'win32') await chmod(nodePath, 0o755)
+  if (platform !== 'win32') {
+    // fs.chmod does not follow symbolic links on macOS and throws EPERM, so
+    // only adjust permissions on regular files. A symlinked runtime keeps the
+    // permissions of its target and must not be treated as damaged.
+    const metadata = await lstat(nodePath)
+    if (!metadata.isSymbolicLink()) await chmod(nodePath, 0o755)
+  }
   const version = await commandOutput(nodePath, ['--version'])
   if (!isCompatibleNodeVersion(version)) {
     throw new Error(`下载的 Node.js 版本不兼容：${version || '未知版本'}`)
@@ -386,13 +457,4 @@ export async function resolveNodeEnvironment(options) {
   const system = await findCompatibleSystemNode(options)
   if (system) return system
   return ensureManagedNode(options)
-}
-
-export async function readInstalledNodeVersion(nodePath) {
-  const { stdout } = await execFileAsync(nodePath, ['--version'], {
-    encoding: 'utf8',
-    timeout: 6_000,
-    windowsHide: true,
-  })
-  return stdout.trim()
 }

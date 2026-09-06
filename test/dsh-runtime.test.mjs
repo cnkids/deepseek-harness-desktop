@@ -7,6 +7,7 @@ import {
   buildHarnessEnvironment,
   inspectDshPackage,
   isDshUpdateRequired,
+  parseDshLaunchUrl,
   readDshUpdateCache,
   writeDshUpdateCache,
 } from '../src/dsh-runtime.mjs'
@@ -98,4 +99,29 @@ test('persists and validates the dsh update-check cache', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('captures the authenticated dsh web launch URL from stdout', () => {
+  const url = parseDshLaunchUrl(
+    'dsh web: http://127.0.0.1:54077/?token=AbC123_- (LAN: http://10.0.0.5:54077/?token=AbC123_-)',
+    { port: 54077 },
+  )
+  assert.equal(url, 'http://127.0.0.1:54077/?token=AbC123_-')
+  assert.equal(parseDshLaunchUrl(`dsh web: ${url}`, { port: 54077 }), url)
+})
+
+test('rejects launch lines that do not match the running instance', () => {
+  const token = 'XyZ9_ab'
+  const options = { port: 54077 }
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54077/?token=${token}`, options), `http://127.0.0.1:54077/?token=${token}`)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54078/?token=${token}`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://localhost:54077/?token=${token}`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://192.168.1.5:54077/?token=${token}`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: https://127.0.0.1:54077/?token=${token}`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54077/`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54077/?token=bad%20token`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54077/?token=bad!token`, options), null)
+  assert.equal(parseDshLaunchUrl(`dsh web: http://127.0.0.1:54077/?token=${token}`, { port: 54078 }), null)
+  assert.equal(parseDshLaunchUrl('some unrelated log line', options), null)
+  assert.equal(parseDshLaunchUrl('', options), null)
 })

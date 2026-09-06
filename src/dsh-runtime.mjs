@@ -8,6 +8,37 @@ const execFileAsync = promisify(execFile)
 
 export const DSH_PACKAGE_NAME = '@deepseek-ai/dsh'
 
+const DSH_LAUNCH_TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/
+
+// dsh web prints its authenticated launch URL on stdout once the local
+// browser-session gateway is ready, for example:
+//   dsh web: http://127.0.0.1:54077/?token=AbC... (LAN: http://...)
+// The token is generated per process and never persisted, so desktop launchers
+// must capture it from that line before loading the UI.
+export function parseDshLaunchUrl(line, { port, hostname = '127.0.0.1' } = {}) {
+  const marker = 'dsh web: '
+  const markerIndex = line.indexOf(marker)
+  if (markerIndex === -1) return null
+  const candidate = line.slice(markerIndex + marker.length).trim().split(/\s+/)[0]
+  let parsed
+  try {
+    parsed = new URL(candidate)
+  } catch {
+    return null
+  }
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.hostname !== hostname ||
+    parsed.port !== String(port) ||
+    parsed.pathname !== '/'
+  ) {
+    return null
+  }
+  const token = parsed.searchParams.get('token')
+  if (!token || !DSH_LAUNCH_TOKEN_PATTERN.test(token)) return null
+  return parsed.href
+}
+
 export async function readDshUpdateCache(cachePath) {
   try {
     const cached = JSON.parse(await readFile(cachePath, 'utf8'))
@@ -219,13 +250,4 @@ export async function updateGlobalDsh({
     },
   )
   return findGlobalInstallation(nodeEnvironment, platform, env)
-}
-
-export async function getGlobalNpmBinDirectory({
-  nodeEnvironment,
-  platform = process.platform,
-  env = process.env,
-}) {
-  const npmPaths = await resolveGlobalNpmPaths(nodeEnvironment, platform, env)
-  return npmPaths?.binDir ?? null
 }

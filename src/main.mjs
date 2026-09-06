@@ -13,6 +13,7 @@ import {
   nativeImage,
   nativeTheme,
   net as electronNet,
+  session,
   shell,
   Tray,
 } from 'electron'
@@ -29,11 +30,17 @@ import {
   DSH_PACKAGE_NAME,
   findUserDshInstallation,
   isDshUpdateRequired,
+  parseDshLaunchUrl,
   readDshUpdateCache,
   updateGlobalDsh,
   writeDshUpdateCache,
 } from './dsh-runtime.mjs'
 import { resolveNodeEnvironment } from './node-runtime.mjs'
+import {
+  isAllowedNavigationUrl,
+  isAllowedRendererPermission,
+  isTrustedIpcSender,
+} from './security-policy.mjs'
 import { readStartupCache, writeStartupCache } from './startup-cache.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -42,12 +49,15 @@ const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai%2fdsh/latest'
 const DSH_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
 const DSH_UPDATE_RETRY_INTERVAL_MS = 5 * 60_000
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
+const DESKTOP_UPDATE_READY_MAX_AGE_MS = 48 * 60 * 60_000
+const LOADING_HTML_PATH = path.join(__dirname, 'loading.html')
 
 let mainWindow = null
 let tray = null
 let dshProcess = null
 let startupPromise = null
 let harnessOrigin = null
+let harnessLaunchUrl = null
 let isQuitting = false
 let desktopUpdateCheck = null
 let desktopUpdateTimeout = null
@@ -107,7 +117,7 @@ async function getAvailablePort() {
   })
 }
 
-function appendProcessOutput(stream, channel) {
+function appendProcessOutput(stream, channel, onLine) {
   if (!stream) return
   let buffer = ''
   stream.setEncoding('utf8')
@@ -116,27 +126,48 @@ function appendProcessOutput(stream, channel) {
     const lines = buffer.split(/\r?\n/)
     buffer = lines.pop() ?? ''
     for (const line of lines) {
-      if (line.trim()) console[channel](`[dsh] ${line}`)
+      const trimmed = line.trim()
+      if (trimmed) {
+        console[channel](`[dsh] ${trimmed}`)
+        onLine?.(trimmed)
+      }
     }
   })
 }
 
-async function waitForHarness(url, child, timeoutMs = STARTUP_TIMEOUT_MS) {
+async function waitForHarness(url, child, getLaunchUrl, timeoutMs = STARTUP_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs
   let exited = false
   let exitCode = null
+  let spawnFailure = null
+  let firstUnauthorizedAt = 0
   child.once('exit', (code) => {
     exited = true
     exitCode = code
   })
+  child.once('error', (error) => {
+    // A failed spawn emits 'error' without ever emitting 'exit', so treat it
+    // as a terminal failure instead of polling for the whole timeout window.
+    spawnFailure = error
+  })
 
   while (Date.now() < deadline) {
+    if (spawnFailure) {
+      throw new Error(`Harness 启动进程失败：${spawnFailure.message}`)
+    }
     if (exited) throw new Error(`Harness 启动进程已退出（代码 ${exitCode ?? '未知'}）。`)
+    const launchUrl = getLaunchUrl?.() ?? null
+    if (firstUnauthorizedAt && !launchUrl && Date.now() - firstUnauthorizedAt >= 30_000) {
+      throw new Error('Harness 需要浏览器认证，但未能从启动输出中读取访问链接。')
+    }
     try {
-      const response = await electronNet.fetch(url, {
+      const response = await electronNet.fetch(launchUrl ?? url, {
         signal: AbortSignal.timeout(2_000),
       })
-      if (response.ok) return
+      if (response.ok) return launchUrl ?? url
+      if (response.status === 401 && firstUnauthorizedAt === 0) {
+        firstUnauthorizedAt = Date.now()
+      }
     } catch {
       // The local server is still starting.
     }
@@ -323,7 +354,19 @@ async function launchHarness() {
   )
   dshProcess = child
   let harnessReady = false
-  appendProcessOutput(child.stdout, 'log')
+  let authenticatedUrl = null
+  appendProcessOutput(child.stdout, 'log', (line) => {
+    // dsh web protects its UI with a per-process launch token printed on
+    // stdout ("dsh web: http://127.0.0.1:PORT/?token=..."); the first request
+    // carrying the token exchanges it for a signed session cookie.
+    if (!authenticatedUrl) {
+      const launchUrl = parseDshLaunchUrl(line, { port })
+      if (launchUrl) {
+        authenticatedUrl = launchUrl
+        harnessLaunchUrl = launchUrl
+      }
+    }
+  })
   appendProcessOutput(child.stderr, 'error')
   child.once('error', (error) => {
     console.error('[dsh] process error', error)
@@ -332,7 +375,8 @@ async function launchHarness() {
     if (!harnessReady || dshProcess !== child || isQuitting) return
     dshProcess = null
     harnessOrigin = null
-    void mainWindow.loadFile(path.join(__dirname, 'loading.html')).then(() => {
+    harnessLaunchUrl = null
+    void mainWindow.loadFile(LOADING_HTML_PATH).then(() => {
       emitStatus(
         'Harness 已停止',
         `后台进程意外退出（${signal ?? `代码 ${code ?? '未知'}`}）。`,
@@ -347,11 +391,11 @@ async function launchHarness() {
     `启动版本 ${dshInstallation.version} · ${url}`,
     null,
   )
-  await waitForHarness(url, child)
+  const readyUrl = await waitForHarness(url, child, () => authenticatedUrl)
   harnessReady = true
   harnessOrigin = new URL(url).origin
   emitStatus('Harness 已启动', url, 100)
-  await mainWindow.loadURL(url)
+  await mainWindow.loadURL(readyUrl)
 }
 
 async function startApplication() {
@@ -359,7 +403,8 @@ async function startApplication() {
   startupPromise = (async () => {
     stopHarness()
     harnessOrigin = null
-    await mainWindow.loadFile(path.join(__dirname, 'loading.html'))
+    harnessLaunchUrl = null
+    await mainWindow.loadFile(LOADING_HTML_PATH)
     try {
       await launchHarness()
     } catch (error) {
@@ -379,13 +424,10 @@ async function startApplication() {
 }
 
 function isAllowedLocalUrl(targetUrl) {
-  try {
-    const parsed = new URL(targetUrl)
-    if (parsed.protocol === 'file:') return true
-    return Boolean(harnessOrigin && parsed.origin === harnessOrigin)
-  } catch {
-    return false
-  }
+  return isAllowedNavigationUrl(targetUrl, {
+    loadingHtmlPath: LOADING_HTML_PATH,
+    harnessOrigin,
+  })
 }
 
 function showMainWindow() {
@@ -418,6 +460,7 @@ function setDesktopUpdateState(status, values = {}) {
     update: has('update') ? values.update : desktopUpdateState.update,
     file: has('file') ? values.file : desktopUpdateState.file,
     error: values.error ?? null,
+    readyAt: status === 'ready' ? Date.now() : null,
   }
 }
 
@@ -560,8 +603,16 @@ async function checkForDesktopUpdate({ manual = false } = {}) {
     return
   }
   if (desktopUpdateState.status === 'ready') {
-    if (manual) await promptDesktopUpdate()
-    return
+    const readyAt = desktopUpdateState.readyAt ?? 0
+    if (Date.now() - readyAt >= DESKTOP_UPDATE_READY_MAX_AGE_MS) {
+      // An ignored download must not shadow newer releases forever: expire the
+      // pending state and fall through to a fresh check. A still-current
+      // package is reused from the verified download cache.
+      setDesktopUpdateState('idle', { update: null, file: null })
+    } else {
+      if (manual) await promptDesktopUpdate()
+      return
+    }
   }
   if (desktopUpdateCheck) return desktopUpdateCheck
 
@@ -668,7 +719,11 @@ function createTrayContextMenu() {
       label: '在默认浏览器中打开',
       enabled: Boolean(harnessOrigin),
       click: () => {
-        if (harnessOrigin) void shell.openExternal(`${harnessOrigin}/`)
+        // Reuse the token-carrying launch URL so an external browser can
+        // complete its own authentication exchange when it has no cookie yet.
+        if (harnessOrigin) {
+          void shell.openExternal(harnessLaunchUrl ?? `${harnessOrigin}/`)
+        }
       },
     },
     { type: 'separator' },
@@ -695,6 +750,22 @@ function createTray() {
   tray.on('click', showMainWindow)
   tray.on('right-click', () => tray?.popUpContextMenu(createTrayContextMenu()))
   nativeTheme.on('updated', updateTrayTheme)
+}
+
+// The window later loads the Harness Web UI, whose page code is delivered by
+// the auto-updated npm package. Deny every permission by default and allow
+// only clipboard writes that mirror user copy actions; this keeps third-party
+// page code from accessing the camera, microphone, notifications and other
+// system capabilities without an explicit product decision.
+function configureRendererPermissions() {
+  session.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback) => {
+      callback(isAllowedRendererPermission(permission))
+    },
+  )
+  session.defaultSession.setPermissionCheckHandler(
+    (_webContents, permission) => isAllowedRendererPermission(permission),
+  )
 }
 
 function createWindow() {
@@ -763,6 +834,7 @@ if (!singleInstance) {
         ? Menu.buildFromTemplate(createApplicationMenuTemplate())
         : null
     Menu.setApplicationMenu(applicationMenu)
+    configureRendererPermissions()
     createTray()
     createWindow()
     scheduleDesktopUpdates()
@@ -772,7 +844,12 @@ if (!singleInstance) {
   })
 }
 
-ipcMain.handle('retry-startup', async () => {
+ipcMain.handle('retry-startup', async (event) => {
+  // The preload bridge is present in every page of the window, so only the
+  // local loading page is allowed to restart the startup flow.
+  if (!isTrustedIpcSender(event.senderFrame, LOADING_HTML_PATH)) {
+    throw new Error('拒绝来自非启动页的重试请求。')
+  }
   await startApplication()
 })
 
