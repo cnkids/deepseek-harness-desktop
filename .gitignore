@@ -4,6 +4,7 @@ release/
 coverage/
 .scannerwork/
 .sonar-cache/
+sonar-project.properties
 .superpowers/
 *.log
 .DS_Store
