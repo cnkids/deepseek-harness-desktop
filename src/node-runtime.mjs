@@ -18,13 +18,21 @@ import { promisify } from 'node:util'
 import semver from 'semver'
 import * as tar from 'tar'
 import yauzl from 'yauzl'
+import { stripTrailingSlashes } from './dsh-registry.mjs'
 
 const execFileAsync = promisify(execFile)
 
 export const REQUIRED_NODE_RANGE = '^22.19.0 || >=24.0.0'
 export const MANAGED_NODE_VERSION = '24.12.0'
-export const NODE_DIST_BASE_URL = `https://nodejs.org/dist/v${MANAGED_NODE_VERSION}`
+// 官方源优先，国内镜像兜底：访问不了 nodejs.org 的机器会在探测阶段就切到镜像，
+// 镜像内容与官方一致（SHA-256 相同），因此校验逻辑不受影响。
+export const NODE_DIST_MIRRORS = Object.freeze([
+  `https://nodejs.org/dist/v${MANAGED_NODE_VERSION}`,
+  `https://cdn.npmmirror.com/binaries/node/v${MANAGED_NODE_VERSION}`,
+])
+export const NODE_DIST_BASE_URL = NODE_DIST_MIRRORS[0]
 export const NODE_DOWNLOAD_TIMEOUT_MS = 10 * 60_000
+const NODE_MIRROR_PROBE_TIMEOUT_MS = 5_000
 
 const UNSAFE_TAR_ENTRY_TYPES = new Set([
   'SymbolicLink',
@@ -406,12 +414,42 @@ export async function findInstalledManagedNode({
   }
 }
 
+export function getNodeDistMirrors(env = process.env) {
+  const override = env.DSH_DESKTOP_NODE_MIRROR?.trim()
+  const mirrors = [...NODE_DIST_MIRRORS]
+  if (!override) return mirrors
+  return [stripTrailingSlashes(override), ...mirrors]
+}
+
+// 用体积很小的 SHASUMS256.txt 做探测，避免在不可达的源上白等十分钟下载超时。
+export async function resolveNodeDistMirror({
+  fetchImpl = globalThis.fetch,
+  env = process.env,
+  probeTimeoutMs = NODE_MIRROR_PROBE_TIMEOUT_MS,
+} = {}) {
+  const mirrors = getNodeDistMirrors(env)
+  for (const baseUrl of mirrors) {
+    try {
+      const response = await fetchImpl(`${baseUrl}/SHASUMS256.txt`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(probeTimeoutMs),
+      })
+      if (response.ok) return baseUrl
+    } catch {
+      // 该镜像不可达，继续探测下一个。
+    }
+  }
+  // 全部不可达时仍返回首选源，让下载阶段给出更具体的报错。
+  return mirrors[0]
+}
+
 export async function ensureManagedNode({
   runtimeRoot,
   platform = process.platform,
   arch = process.arch,
   fetchImpl = globalThis.fetch,
   onProgress,
+  env = process.env,
 }) {
   const artifact = getNodeArtifact(platform, arch)
   const installDir = managedNodeInstallDirectory(runtimeRoot, platform, arch)
@@ -424,13 +462,13 @@ export async function ensureManagedNode({
   const extractDir = path.join(stagingRoot, 'extracted')
 
   try {
-    onProgress?.({ phase: 'download-start', file: artifact.file })
-    await downloadArchive(
-      `${NODE_DIST_BASE_URL}/${artifact.file}`,
-      archivePath,
-      fetchImpl,
-      onProgress,
-    )
+    const baseUrl = await resolveNodeDistMirror({ fetchImpl, env })
+    onProgress?.({
+      phase: 'download-start',
+      file: artifact.file,
+      source: baseUrl === NODE_DIST_MIRRORS[0] ? 'official' : 'mirror',
+    })
+    await downloadArchive(`${baseUrl}/${artifact.file}`, archivePath, fetchImpl, onProgress)
 
     onProgress?.({ phase: 'verify' })
     const actualHash = await sha256File(archivePath)

@@ -85,6 +85,7 @@ test('persists and validates the dsh update-check cache', async () => {
       version: '0.1.0-rc.6',
       checkedAt: 123456,
       successful: true,
+      registry: null,
     })
 
     await writeDshUpdateCache(cachePath, '0.1.0-rc.6', 123457, false)
@@ -92,6 +93,16 @@ test('persists and validates the dsh update-check cache', async () => {
       version: '0.1.0-rc.6',
       checkedAt: 123457,
       successful: false,
+      registry: null,
+    })
+
+    // 命中的软件源要一起记住，缓存期内更新 dsh 才能继续走同一个源。
+    await writeDshUpdateCache(cachePath, '0.1.0-rc.6', 123458, true, 'https://registry.npmmirror.com')
+    assert.deepEqual(await readDshUpdateCache(cachePath), {
+      version: '0.1.0-rc.6',
+      checkedAt: 123458,
+      successful: true,
+      registry: 'https://registry.npmmirror.com',
     })
 
     await writeFile(cachePath, '{"version":"invalid","checkedAt":123456}')

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -27,12 +27,15 @@ async function createFakeRuntime({ withGlobalInstall = true } = {}) {
     await mkdir(npmRoot, { recursive: true })
   }
 
-  // 假的 node：按参数回答 --version / npm root / npm prefix，其余静默成功。
+  // 假的 node：按参数回答 --version / npm root / npm prefix，其余静默成功，
+  // 并把收到的参数写入日志以便断言 npm install 的开关。
   const fakeNode = path.join(root, 'fake-node')
+  const logPath = path.join(root, 'fake-node.log')
   await writeFile(
     fakeNode,
     [
       '#!/bin/sh',
+      'echo "$* registry=$npm_config_registry" >> "$FAKE_LOG"',
       'case "$*" in',
       '  *--version*) echo "v24.0.0" ;;',
       '  *"root --global"*) echo "$FAKE_NPM_ROOT" ;;',
@@ -42,7 +45,8 @@ async function createFakeRuntime({ withGlobalInstall = true } = {}) {
       '',
     ].join('\n'),
   )
-  await chmod(fakeNode, 0o755)
+  // 只给当前用户可执行权限：测试用的假 node 不需要其他用户可读或可执行。
+  await chmod(fakeNode, 0o700)
 
   // npm 自带入口：dsh-runtime 会从 npx-cli.js 的位置推导 npm-cli.js。
   const npmBin = path.join(npmPrefix, 'lib', 'node_modules', 'npm', 'bin')
@@ -56,9 +60,15 @@ async function createFakeRuntime({ withGlobalInstall = true } = {}) {
     npxCliPath,
     npmRoot,
     npmPrefix,
+    logPath,
     packageRoot: path.join(npmRoot, '@deepseek-ai', 'dsh'),
     nodeEnvironment: { source: 'system', version: '24.0.0', nodePath: fakeNode, npxCliPath },
-    env: { ...process.env, FAKE_NPM_ROOT: npmRoot, FAKE_NPM_PREFIX: npmPrefix },
+    env: {
+      ...process.env,
+      FAKE_NPM_ROOT: npmRoot,
+      FAKE_NPM_PREFIX: npmPrefix,
+      FAKE_LOG: logPath,
+    },
   }
 }
 
@@ -103,6 +113,21 @@ test('updates the global dsh and re-inspects the installation', skipOnWindows, a
 
   assert.equal(installation.version, '1.2.3')
   assert.equal(installation.binDir, path.join(runtime.npmPrefix, 'bin'))
+})
+
+test('passes the resolved registry to npm through the environment', skipOnWindows, async () => {
+  const runtime = await createFakeRuntime()
+
+  await updateGlobalDsh({
+    nodeEnvironment: runtime.nodeEnvironment,
+    version: '1.2.3',
+    platform: 'linux',
+    env: runtime.env,
+    registry: 'https://registry.npmmirror.com',
+  })
+
+  const log = await readFile(runtime.logPath, 'utf8')
+  assert.match(log, /registry=https:\/\/registry\.npmmirror\.com/)
 })
 
 test('rejects packages that are not dsh or have no usable bin entry', async () => {

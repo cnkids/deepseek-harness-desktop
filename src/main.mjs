@@ -26,6 +26,7 @@ import {
   createWebContextMenuTemplate,
 } from './edit-menu.mjs'
 import { summarizeHarnessFailure } from './harness-diagnostics.mjs'
+import { fetchLatestDshVersion, resolveDshRegistries } from './dsh-registry.mjs'
 import {
   buildHarnessEnvironment,
   DSH_PACKAGE_NAME,
@@ -46,7 +47,6 @@ import { readStartupCache, writeStartupCache } from './startup-cache.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const STARTUP_TIMEOUT_MS = 10 * 60_000
-const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai%2fdsh/latest'
 const DSH_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
 const DSH_UPDATE_RETRY_INTERVAL_MS = 5 * 60_000
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
@@ -84,7 +84,11 @@ function formatBytes(bytes) {
 function reportNodeProgress(event) {
   switch (event.phase) {
     case 'download-start':
-      emitStatus('正在安装私有 Node.js', `准备下载 ${event.file}`, 0)
+      emitStatus(
+        '正在安装私有 Node.js',
+        event.source === 'mirror' ? `通过国内镜像下载 ${event.file}` : `准备下载 ${event.file}`,
+        0,
+      )
       break
     case 'download': {
       const progress = event.total ? Math.round((event.received / event.total) * 100) : null
@@ -191,33 +195,38 @@ async function resolveLatestDshVersion(installedVersion = null) {
     : DSH_UPDATE_RETRY_INTERVAL_MS
   if (cached && Date.now() - cached.checkedAt < cacheMaxAge) {
     emitStatus('Harness 版本检查完成', `复用最近检查结果 ${cached.version}`, null)
-    return cached.version
+    return { version: cached.version, registry: cached.registry ?? null }
   }
 
-  emitStatus('正在检查 Harness 更新', '查询 npm 官方软件源', null)
+  emitStatus('正在检查 Harness 更新', '依次查询 npm 官方源与国内镜像', null)
   try {
-    const response = await electronNet.fetch(DSH_REGISTRY_URL, {
-      signal: AbortSignal.timeout(10_000),
+    const { version, registry } = await fetchLatestDshVersion({
+      fetchImpl: electronNet.fetch,
+      registries: resolveDshRegistries(),
     })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const manifest = await response.json()
-    if (!manifest || typeof manifest.version !== 'string') {
-      throw new Error('npm 返回的版本信息无效')
+    await writeDshUpdateCache(cachePath, version, Date.now(), true, registry)
+    if (!registry.includes('registry.npmjs.org')) {
+      emitStatus('Harness 版本检查完成', `使用镜像源 ${registry}`, null)
     }
-    await writeDshUpdateCache(cachePath, manifest.version)
-    return manifest.version
+    return { version, registry }
   } catch (error) {
     console.warn('[dsh] update check failed', error)
     emitStatus('无法联网检查 Harness 更新', '如已安装，将继续使用当前版本', null)
     const fallbackVersion = cached?.version ?? installedVersion
     if (fallbackVersion) {
       try {
-        await writeDshUpdateCache(cachePath, fallbackVersion, Date.now(), false)
+        await writeDshUpdateCache(
+          cachePath,
+          fallbackVersion,
+          Date.now(),
+          false,
+          cached?.registry ?? null,
+        )
       } catch (cacheError) {
         console.warn('[dsh] unable to cache failed update check', cacheError)
       }
     }
-    return fallbackVersion
+    return { version: fallbackVersion, registry: cached?.registry ?? null }
   }
 }
 
@@ -248,7 +257,7 @@ function stopHarness() {
   timer.unref()
 }
 
-async function prepareDshInstallation(nodeEnvironment, latestVersion, env, installed) {
+async function prepareDshInstallation(nodeEnvironment, latestVersion, env, installed, registry = null) {
   const isSystemRuntime = nodeEnvironment.source === 'system'
   const scopeLabel = isSystemRuntime ? '用户全局环境' : '应用私有环境'
 
@@ -272,6 +281,7 @@ async function prepareDshInstallation(nodeEnvironment, latestVersion, env, insta
       version: targetVersion,
       platform: process.platform,
       env,
+      registry,
     })
     if (!installation) throw new Error('npm 完成后未找到 dsh 全局安装')
     return installation
@@ -352,12 +362,13 @@ async function launchHarness() {
   )
 
   const baseEnvironment = buildHarnessEnvironment(nodeEnvironment)
-  const latestVersion = await resolveLatestDshVersion(installed?.version)
+  const { version: latestVersion, registry } = await resolveLatestDshVersion(installed?.version)
   const dshInstallation = await prepareDshInstallation(
     nodeEnvironment,
     latestVersion,
     baseEnvironment,
     installed,
+    registry,
   )
   if (shouldUseStartupCache) {
     try {

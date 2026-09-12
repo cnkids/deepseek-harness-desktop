@@ -39,14 +39,14 @@ DeepSeek Harness Desktop 是面向 macOS、Windows 和 Linux 的非官方桌面�
 
 | 平台 | 系统要求 | 安装包 |
 | --- | --- | --- |
-| macOS Apple Silicon | macOS 10.15+，`arm64` | DMG / ZIP |
-| macOS Intel | macOS 10.15+，`x64` | DMG / ZIP |
+| macOS Apple Silicon | macOS 12.0+，`arm64` | DMG / ZIP |
+| macOS Intel | macOS 12.0+，`x64` | DMG / ZIP |
 | Windows | Windows 10/11，`x64` | NSIS 安装程序 / 便携版 EXE |
 | Linux | 常见 `x86_64` 发行版 | AppImage / DEB |
 
 发布资产也会镜像到 Cloudflare R2，可通过[最新版清单](https://pub-bf5092e77ab5409ba39fb34c4a76c1b1.r2.dev/deepseek-harness-desktop/latest.json)查询版本、文件大小、下载地址与 SHA-256。
 
-安装后的桌面端会自动读取这份清单：启动后检查新版本，并每 6 小时复查一次。发现新版时会在后台下载与校验对应平台的安装包，完成后提示安装；也可以从系统托盘手动检查。Windows 会退出后启动 NSIS 安装程序，Linux AppImage 会原位替换并重启，DEB 与 macOS DMG 会交给系统安装界面处理。
+安装后的桌面端会自动读取这份清单：启动后检查新版本，并每 6 小时复查一次。发现新版时会在后台下载与校验对应平台的安装包，完成后提示安装；也可以从系统托盘手动检查。Windows 会退出后启动 NSIS 安装程序，Linux AppImage 会原位替换并重启，DEB 与 macOS DMG 会交给系统安装界面处理。被忽略的更新提示会在 48 小时后过期，不会长期屏蔽后续版本。
 
 Windows 还提供文件名带 `-portable-` 的免安装版：双击即可运行，不创建开始菜单项或卸载记录，适合快速试用或放在 U 盘中携带。便携版同样把私有 Node.js 运行时与 Harness 缓存保存在 `%APPDATA%\DeepSeek Harness Desktop`，并沿用同一套桌面端自动更新流程；自动更新始终选择 NSIS 安装程序，不会用便携版覆盖已安装的版本。
 
@@ -87,14 +87,36 @@ xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"
 
 首次启动需要联网访问 Node.js、npm 与 DeepSeek Harness 相关服务，耗时取决于网络状况。后续启动直接复用上次已验证的 Node.js 与 Harness 路径，仅在缓存失效时重新检测环境；Harness 更新检查结果会短期缓存，避免频繁联网阻塞启动。启动失败时可以在启动页直接重试。
 
+### 国内网络环境
+
+初始化地址默认使用官方源，探测不通时会自动改用国内镜像，无需手动配置：
+
+| 用途 | 官方源 | 自动回退 |
+| --- | --- | --- |
+| 私有 Node.js 下载 | `nodejs.org/dist` | `cdn.npmmirror.com/binaries/node` |
+| `@deepseek-ai/dsh` 查询与安装 | `registry.npmjs.org` | `registry.npmmirror.com` |
+
+探测只用几 KB 的 `SHASUMS256.txt` 做一次 HEAD 请求（5 秒超时），因此无法访问境外地址的机器会很快切换，而不是等到下载超时。镜像内容与官方一致，Node.js 归档仍会通过固定 SHA-256 校验；启动页会显示实际使用的下载来源。
+
+如需指向企业内网或代理，可用环境变量指定（会排在官方源之前优先尝试）：
+
+```sh
+DSH_DESKTOP_NODE_MIRROR=https://mirror.example.com/node/v24.12.0 \
+DSH_DESKTOP_NPM_REGISTRY=https://registry.example.com \
+npm start
+```
+
+`DSH_DESKTOP_NODE_MIRROR` 指向 Node.js 发行目录（不含文件名），`DSH_DESKTOP_NPM_REGISTRY` 指向 npm registry 根地址。
+
 ## 主要功能
 
 | 功能 | 说明 |
 | --- | --- |
 | 一键启动 | 自动运行 `@deepseek-ai/dsh web`，无需手动使用终端 |
 | 环境自适应 | 优先使用兼容的系统 Node.js，否则安装应用私有 runtime |
+| 网络自适应 | 初始化默认走官方源，探测不通时自动回退国内镜像，也可用环境变量指定私有源 |
 | 安全校验 | 下载的 Node.js 官方归档通过固定 SHA-256 校验后才会安装 |
-| 自动同步 | 启动时查询 npm registry，并在用户全局环境或应用私有环境中原位更新 DSH |
+| 自动同步 | 启动时查询 npm registry（官方源优先，不可达时自动改用国内镜像），并在用户全局环境或应用私有环境中原位更新 DSH |
 | 桌面端自动更新 | 通过 R2 清单自动检查、下载并校验新版安装包，失败不影响当前版本运行；忽略的更新提示会过期，不会屏蔽更新的版本 |
 | 本地优先 | Harness 服务绑定 `127.0.0.1`，工作状态与缓存保存在本机 |
 | 最小权限 | 页面权限默认拒绝（剪贴板写入除外），窗口只允许导航到本地启动页与当前 Harness，重启通道仅对启动页开放 |
@@ -109,9 +131,10 @@ xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"
    │
    ├─ 找到兼容的系统 Node.js（^22.19.0 或 >=24.0.0）
    │
-   └─ 未找到 → 下载 Node.js 24.12.0 → SHA-256 校验 → 安装到私有目录
+   └─ 未找到 → 探测下载源（官方 → 国内镜像）→ 下载 Node.js 24.12.0
+              → SHA-256 校验 → 安装到私有目录
    │
-   └─ 查询 @deepseek-ai/dsh 最新版本
+   └─ 查询 @deepseek-ai/dsh 最新版本（官方源 → 国内镜像）
    │
    └─ 系统 Node.js → 复用/更新用户全局 dsh
    │  私有 Node.js → 复用/更新私有全局 dsh
@@ -138,11 +161,20 @@ npm run check:environment
 npm start
 ```
 
-如需指定用于启动 Harness 的 Node.js，可传入绝对路径：
+启动时可用环境变量覆盖默认行为：
+
+| 变量 | 用途 |
+| --- | --- |
+| `DSH_DESKTOP_NODE` | 指定用于启动 Harness 的 Node.js 绝对路径 |
+| `DSH_DESKTOP_DSH` | 指定 `dsh` 可执行文件路径 |
+| `DSH_DESKTOP_NODE_MIRROR` | 覆盖 Node.js 下载源，会排在官方源之前优先尝试 |
+| `DSH_DESKTOP_NPM_REGISTRY` | 覆盖 npm registry，会排在官方源之前优先尝试 |
 
 ```sh
 DSH_DESKTOP_NODE=/absolute/path/to/node npm start
 ```
+
+完整环境变量说明见[国内网络环境](#国内网络环境)。
 
 常用命令：
 
@@ -159,14 +191,20 @@ DSH_DESKTOP_NODE=/absolute/path/to/node npm start
 维护者在干净且已同步的 `main` 分支运行：
 
 ```sh
-npm run release -- 0.2.0
+npm run release -- 0.3.0
 ```
 
-脚本会更新版本、运行测试、创建 release commit 和 `v0.2.0` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要并创建 GitHub Release；配置 R2 凭据后，还会同步不可变的版本资产。
+脚本会更新版本、运行测试、创建 release commit 和 `v0.3.0` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要并创建 GitHub Release；配置 R2 凭据后，还会同步不可变的版本资产。
 
 完整配置与发布流程见[发布说明](docs/releasing.md)。
 
 ## 版本记录
+
+### 0.2.0
+
+- 初始化支持国内网络环境：私有 Node.js 下载与 `dsh` 安装会在官方源不可达时自动回退到国内镜像，无需手动配置；也可用 `DSH_DESKTOP_NODE_MIRROR`、`DSH_DESKTOP_NPM_REGISTRY` 指定企业内网或代理。
+- 启动页会显示 Node.js 的下载来源（官方源 / 国内镜像）。
+- 补齐软件源回退、镜像探测与 npm 全局安装路径的单元测试，项目整体覆盖率提升到 83%。
 
 ### 0.1.11
 

@@ -45,7 +45,13 @@ export async function readDshUpdateCache(cachePath) {
     const version = semver.clean(cached?.version)
     const checkedAt = Number(cached?.checkedAt)
     if (!version || !Number.isFinite(checkedAt) || checkedAt <= 0) return null
-    return { version, checkedAt, successful: cached?.successful !== false }
+    return {
+      version,
+      checkedAt,
+      successful: cached?.successful !== false,
+      // 记录命中的软件源，缓存期内更新 dsh 时才能继续走同一个源。
+      registry: typeof cached?.registry === 'string' ? cached.registry : null,
+    }
   } catch {
     return null
   }
@@ -56,17 +62,16 @@ export async function writeDshUpdateCache(
   version,
   checkedAt = Date.now(),
   successful = true,
+  registry = null,
 ) {
   const cleanedVersion = semver.clean(version)
   if (!cleanedVersion || !Number.isFinite(checkedAt) || checkedAt <= 0) {
     throw new Error('无法缓存无效的 Harness 版本信息。')
   }
+  const payload = { version: cleanedVersion, checkedAt, successful }
+  if (registry) payload.registry = registry
   await mkdir(path.dirname(cachePath), { recursive: true })
-  await writeFile(
-    cachePath,
-    `${JSON.stringify({ version: cleanedVersion, checkedAt, successful })}\n`,
-    'utf8',
-  )
+  await writeFile(cachePath, `${JSON.stringify(payload)}\n`, 'utf8')
 }
 
 export function buildHarnessEnvironment(
@@ -245,17 +250,24 @@ export async function updateGlobalDsh({
   version,
   platform = process.platform,
   env = process.env,
+  registry = null,
 }) {
-  await execFileAsync(
-    nodeEnvironment.nodePath,
-    [npmCliPath(nodeEnvironment), 'install', '--global', `${DSH_PACKAGE_NAME}@${version}`],
-    {
-      env,
-      encoding: 'utf8',
-      timeout: 5 * 60_000,
-      windowsHide: true,
-      maxBuffer: 8 * 1024 * 1024,
-    },
-  )
-  return findGlobalInstallation(nodeEnvironment, platform, env)
+  const args = [
+    npmCliPath(nodeEnvironment),
+    'install',
+    '--global',
+    `${DSH_PACKAGE_NAME}@${version}`,
+  ]
+  // 通过 npm_config_registry 环境变量指定软件源：既避免把外部数据拼进命令行
+  // 参数，也与 buildHarnessEnvironment 注入 npm 配置的方式保持一致。
+  const installEnvironment = registry ? { ...env, npm_config_registry: registry } : env
+
+  await execFileAsync(nodeEnvironment.nodePath, args, {
+    env: installEnvironment,
+    encoding: 'utf8',
+    timeout: 5 * 60_000,
+    windowsHide: true,
+    maxBuffer: 8 * 1024 * 1024,
+  })
+  return findGlobalInstallation(nodeEnvironment, platform, installEnvironment)
 }

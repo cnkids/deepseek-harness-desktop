@@ -5,10 +5,10 @@
 Run the release command from a clean, up-to-date `main` branch:
 
 ```sh
-npm run release -- 0.2.0
+npm run release -- 0.3.0
 ```
 
-Pushing the generated `v0.2.0` tag starts `.github/workflows/release.yml`. The workflow builds on native GitHub-hosted runners and publishes DMG/ZIP, EXE, AppImage, and DEB assets to the matching GitHub Release.
+Pushing the generated `v0.3.0` tag starts `.github/workflows/release.yml`. The workflow builds on native GitHub-hosted runners and publishes DMG/ZIP, EXE, AppImage, and DEB assets to the matching GitHub Release.
 
 The workflow can also be re-run manually. Choose **Actions → Package and publish release → Run workflow** and enter a version that exactly matches `package.json`.
 
