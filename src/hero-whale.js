@@ -1,4 +1,4 @@
-import { createPixelData } from './hero-pixels.mjs'
+import { createPixelData, createRandomSource } from './hero-pixels.mjs'
 
 const stage = document.querySelector('#hero-whale-stage')
 const reducedMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -198,13 +198,14 @@ function initializeHeroWhale(THREE) {
     const mesh = new THREE.InstancedMesh(geometry, material, pixelData.count)
     mesh.frustumCulled = false
     const dummy = new THREE.Object3D()
+    const nextScaleJitter = createRandomSource()
     for (let index = 0; index < pixelData.count; index += 1) {
       dummy.position.set(
         pixelData.positions[index * 3],
         pixelData.positions[index * 3 + 1],
         pixelData.positions[index * 3 + 2],
       )
-      const scale = 0.5 + Math.random()
+      const scale = 0.5 + nextScaleJitter()
       dummy.scale.set(scale, scale, scale)
       dummy.updateMatrix()
       mesh.setMatrixAt(index, dummy.matrix)

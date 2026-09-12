@@ -32,10 +32,10 @@ export function countEmptyNeighbours(luminance, size, x, y) {
   return emptyNeighbours / 8
 }
 
-// 粒子散布只需要均匀随机扰动，不依赖伪随机序列的可复现性，因此使用
-// 批量取样的 crypto.getRandomValues：既避免 SonarQube 把 Math.random
-// 记为安全热点（S2245），也比逐像素调用更快。
-function createRandomSource(poolSize = 1024) {
+// 粒子散布与缩放抖动只需要均匀随机扰动，不依赖伪随机序列的可复现性，
+// 因此使用批量取样的 crypto.getRandomValues：既避免 SonarQube 把
+// Math.random 记为安全热点（S2245），也比逐像素调用更快。
+export function createRandomSource(poolSize = 1024) {
   const pool = new Uint32Array(poolSize)
   let cursor = poolSize
 
