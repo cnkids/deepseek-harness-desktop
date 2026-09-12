@@ -881,16 +881,20 @@ if (singleInstance) {
     app.setAppUserModelId('com.atlankj.deepseekharnessdesktop')
   }
 
-  await app.whenReady()
-  const applicationMenu =
-    process.platform === 'darwin'
-      ? Menu.buildFromTemplate(createApplicationMenuTemplate())
-      : null
-  Menu.setApplicationMenu(applicationMenu)
-  configureRendererPermissions()
-  createTray()
-  createWindow()
-  scheduleDesktopUpdates()
+  // Electron 只有在入口模块求值完成后才发出 ready 事件，所以顶层写
+  // `await app.whenReady()` 会永久挂起：既不显示窗口也不退出。这里必须
+  // 保留 promise 链，SonarQube 的 S7785 在 Electron 主进程中不适用。
+  app.whenReady().then(() => { // NOSONAR: 顶层 await app.whenReady() 会死锁
+    const applicationMenu =
+      process.platform === 'darwin'
+        ? Menu.buildFromTemplate(createApplicationMenuTemplate())
+        : null
+    Menu.setApplicationMenu(applicationMenu)
+    configureRendererPermissions()
+    createTray()
+    createWindow()
+    scheduleDesktopUpdates()
+  })
   app.on('activate', () => {
     showMainWindow()
   })

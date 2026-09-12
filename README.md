@@ -166,6 +166,17 @@ npm run release -- 0.2.0
 
 完整配置与发布流程见[发布说明](docs/releasing.md)。
 
+## 版本记录
+
+### 0.1.9
+
+- 修复主进程顶层 `await app.whenReady()` 造成的启动死锁：进程会驻留却永不显示窗口，双击应用表现为“没有反应”，macOS 与 Windows 包都受影响。
+- 修复 Windows 退出后残留 `dsh` 子进程：改用 `taskkill /T` 结束整棵进程树。
+- 修复便携版被自动更新成 NSIS 安装版：便携版现在只提示手动下载新文件。
+- 修复 Linux 桌面端自动更新始终找不到安装包：按 `x64/arm64` 匹配真实产物名。
+- 启动页进度条改用原生 `<progress>` 元素，保留原有视觉并改善可访问性；启动页脚本统一使用 `globalThis`。
+- 补齐启动守卫、加载页状态机与像素采样的单元测试，SonarQube 存量问题清零（新代码覆盖率门槛 ≥80%，当前约 90%）。
+
 ## 项目关系
 
 - [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)：提供核心 Agent、插件系统和 Web UI；本项目通过公开的 npm 包运行它。
