@@ -490,7 +490,7 @@ function restartApplication() {
 }
 
 function setDesktopUpdateState(status, values = {}) {
-  const has = (key) => Object.prototype.hasOwnProperty.call(values, key)
+  const has = (key) => Object.hasOwn(values, key)
   desktopUpdateState = {
     status,
     progress: values.progress ?? null,
@@ -594,18 +594,18 @@ async function installDesktopUpdate() {
   }
 }
 
+function resolveInstallLabel(file) {
+  if (process.platform === 'linux' && file.endsWith('.AppImage')) return '重启并更新'
+  return process.platform === 'win32' ? '退出并安装' : '打开安装包'
+}
+
 async function promptDesktopUpdate() {
   if (desktopUpdatePrompt) return desktopUpdatePrompt
   const { update, file } = desktopUpdateState
   if (!update || !file || desktopUpdateState.status !== 'ready') return
 
   const version = update.manifest.version
-  const installLabel =
-    process.platform === 'linux' && file.endsWith('.AppImage')
-      ? '重启并更新'
-      : process.platform === 'win32'
-        ? '退出并安装'
-        : '打开安装包'
+  const installLabel = resolveInstallLabel(file)
 
   desktopUpdatePrompt = showMessageBox({
     type: 'info',
@@ -740,13 +740,13 @@ function scheduleDesktopUpdates() {
   desktopUpdateInterval.unref()
 }
 
+function resolveTrayIconName() {
+  if (process.platform === 'darwin') return 'tray-icon.png'
+  return nativeTheme.shouldUseDarkColors ? 'tray-icon-dark.png' : 'tray-icon-light.png'
+}
+
 function createTrayImage() {
-  const assetName =
-    process.platform === 'darwin'
-      ? 'tray-icon.png'
-      : nativeTheme.shouldUseDarkColors
-        ? 'tray-icon-dark.png'
-        : 'tray-icon-light.png'
+  const assetName = resolveTrayIconName()
   const iconPath = path.join(__dirname, 'assets', 'brand', assetName)
   const iconSize = process.platform === 'darwin' ? 18 : 20
   const trayImage = nativeImage.createFromPath(iconPath).resize({
@@ -870,32 +870,32 @@ function createWindow() {
 }
 
 const singleInstance = app.requestSingleInstanceLock()
-if (!singleInstance) {
-  app.quit()
-} else {
+if (singleInstance) {
   app.on('second-instance', () => {
     showMainWindow()
   })
 
-  app.whenReady().then(() => {
-    if (process.platform === 'win32') {
-      // 让任务栏分组、跳转列表和系统通知使用应用自身身份，而不是 Electron
-      // 默认身份；该值必须与 package.json 的 build.appId 保持一致。
-      app.setAppUserModelId('com.atlankj.deepseekharnessdesktop')
-    }
-    const applicationMenu =
-      process.platform === 'darwin'
-        ? Menu.buildFromTemplate(createApplicationMenuTemplate())
-        : null
-    Menu.setApplicationMenu(applicationMenu)
-    configureRendererPermissions()
-    createTray()
-    createWindow()
-    scheduleDesktopUpdates()
-  })
+  if (process.platform === 'win32') {
+    // 让任务栏分组、跳转列表和系统通知使用应用自身身份，而不是 Electron
+    // 默认身份；该值必须与 package.json 的 build.appId 保持一致。
+    app.setAppUserModelId('com.atlankj.deepseekharnessdesktop')
+  }
+
+  await app.whenReady()
+  const applicationMenu =
+    process.platform === 'darwin'
+      ? Menu.buildFromTemplate(createApplicationMenuTemplate())
+      : null
+  Menu.setApplicationMenu(applicationMenu)
+  configureRendererPermissions()
+  createTray()
+  createWindow()
+  scheduleDesktopUpdates()
   app.on('activate', () => {
     showMainWindow()
   })
+} else {
+  app.quit()
 }
 
 ipcMain.handle('retry-startup', async (event) => {

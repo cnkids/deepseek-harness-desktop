@@ -1,7 +1,7 @@
 import { createPixelData } from './hero-pixels.mjs'
 
 const stage = document.querySelector('#hero-whale-stage')
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const reducedMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
 const lowPowerDevice =
   (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
   (navigator.deviceMemory && navigator.deviceMemory <= 4)
@@ -26,7 +26,7 @@ function initializeHeroWhale(THREE) {
   function createScene(pixelData) {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: !lowPowerDevice })
     renderer.setClearColor(0x000000, 0)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowPowerDevice ? 0.85 : 1.15))
+    renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, lowPowerDevice ? 0.85 : 1.15))
     renderer.setSize(800, 800, false)
     renderer.domElement.dataset.engine = `three.js r${THREE.REVISION}`
     stage.appendChild(renderer.domElement)
@@ -224,7 +224,7 @@ function initializeHeroWhale(THREE) {
     const frameInterval = 1000 / (lowPowerDevice ? 24 : 30)
 
     function render(timestamp) {
-      window.requestAnimationFrame(render)
+      globalThis.requestAnimationFrame(render)
       if (!visible || document.hidden || timestamp - lastFrame < frameInterval) return
       lastFrame = timestamp - ((timestamp - lastFrame) % frameInterval)
 
@@ -293,15 +293,27 @@ function initializeHeroWhale(THREE) {
       { rootMargin: '100px' },
     )
     observer.observe(stage)
-    window.requestAnimationFrame(render)
+    globalThis.requestAnimationFrame(render)
   }
 
   const image = new Image()
   image.crossOrigin = 'anonymous'
-  image.addEventListener('load', () => createScene(createPixelData(image, 60)), { once: true })
+  image.addEventListener(
+    'load',
+    () => {
+      // WebGL 不可用时（远程桌面、软件渲染初始化失败）只放弃这段装饰动画，
+      // 不能让异常冒泡打断启动页的其余脚本。
+      try {
+        createScene(createPixelData(image, 60))
+      } catch (error) {
+        console.warn('[hero-whale] unable to build the scene', error)
+      }
+    },
+    { once: true },
+  )
   image.src = new URL('./assets/brand/hero-whale.svg', import.meta.url).href
 
-  window.addEventListener(
+  globalThis.addEventListener(
     'mousemove',
     (event) => {
       pointer.active = true
@@ -312,7 +324,7 @@ function initializeHeroWhale(THREE) {
     },
     { passive: true },
   )
-  window.addEventListener('mouseleave', () => {
+  globalThis.addEventListener('mouseleave', () => {
     pointer.active = false
   })
   document.addEventListener('visibilitychange', () => {
@@ -325,7 +337,7 @@ function startHeroWhale() {
     heroStarted ||
     !stage ||
     reducedMotion ||
-    window.matchMedia('(max-width: 767px)').matches
+    globalThis.matchMedia('(max-width: 767px)').matches
   ) {
     return
   }
@@ -340,14 +352,14 @@ function startHeroWhale() {
     }
   }
 
-  window.setTimeout(() => {
-    if ('requestIdleCallback' in window) {
-      window.requestIdleCallback(load, { timeout: 600 })
+  globalThis.setTimeout(() => {
+    if ('requestIdleCallback' in globalThis) {
+      globalThis.requestIdleCallback(load, { timeout: 600 })
     } else {
       void load()
     }
   }, 380)
 }
 
-window.addEventListener('startup-shell-ready', startHeroWhale, { once: true })
-window.setTimeout(startHeroWhale, 1_000)
+globalThis.addEventListener('startup-shell-ready', startHeroWhale, { once: true })
+globalThis.setTimeout(startHeroWhale, 1_000)

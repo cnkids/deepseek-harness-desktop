@@ -1,7 +1,7 @@
 const message = document.querySelector('#message')
 const detail = document.querySelector('#detail')
 const progressTrack = document.querySelector('#progress-track')
-const progressBar = document.querySelector('#progress-bar')
+const progressMeter = document.querySelector('#progress-meter')
 const progressLabel = document.querySelector('#progress-label')
 const progressValue = document.querySelector('#progress-value')
 const retry = document.querySelector('#retry')
@@ -10,10 +10,10 @@ const stages = [...document.querySelectorAll('.stage')]
 // Let the shell paint before compiling the decorative WebGL scenes. Starting
 // those scenes during HTML evaluation used to make the entry animations miss
 // their first frames on slower GPUs.
-window.requestAnimationFrame(() => {
-  window.requestAnimationFrame(() => {
+globalThis.requestAnimationFrame(() => {
+  globalThis.requestAnimationFrame(() => {
     document.body.classList.add('is-shell-ready')
-    window.dispatchEvent(new CustomEvent('startup-shell-ready'))
+    globalThis.dispatchEvent(new CustomEvent('startup-shell-ready'))
   })
 })
 
@@ -23,6 +23,17 @@ function resolveStage(status) {
   if (/DeepSeek Harness 已就绪|准备 DeepSeek Harness|安装 DeepSeek Harness|更新 DeepSeek Harness|插件|依赖/i.test(text)) return 2
   if (/Harness 更新|npm 官方|版本|联网检查/i.test(text)) return 1
   return 0
+}
+
+function resolveStageLabel(isComplete, isCurrent, status) {
+  if (isComplete) return '完成'
+  if (isCurrent) return status.error ? '异常' : '进行中'
+  return '等待'
+}
+
+function resolveProgressLabel(status, safeProgress) {
+  if (status.error) return '启动中断'
+  return safeProgress === 100 ? '即将就绪' : '初始化中'
 }
 
 function updateStages(currentStage, status) {
@@ -37,7 +48,7 @@ function updateStages(currentStage, status) {
     stage.classList.toggle('has-stage-error', Boolean(status.error) && isCurrent)
 
     if (state) {
-      state.textContent = isComplete ? '完成' : isCurrent ? (status.error ? '异常' : '进行中') : '等待'
+      state.textContent = resolveStageLabel(isComplete, isCurrent, status)
     }
   })
 }
@@ -49,31 +60,29 @@ function renderStatus(status) {
 
   message.textContent = status.message || '正在启动 DeepSeek Harness'
   detail.textContent = status.detail || ''
-  progressLabel.textContent = status.error ? '启动中断' : safeProgress === 100 ? '即将就绪' : '初始化中'
+  progressLabel.textContent = resolveProgressLabel(status, safeProgress)
   progressValue.textContent = safeProgress === null ? '···' : `${Math.round(safeProgress)}%`
   document.body.classList.toggle('has-error', Boolean(status.error))
   document.body.dataset.stage = String(currentStage)
   retry.hidden = !status.error
   updateStages(currentStage, status)
 
-  if (safeProgress !== null) {
-    progressTrack.classList.add('is-determinate')
-    progressTrack.setAttribute('aria-valuenow', String(safeProgress))
-    progressBar.style.width = `${safeProgress}%`
-  } else {
+  if (safeProgress === null) {
     progressTrack.classList.remove('is-determinate')
-    progressTrack.removeAttribute('aria-valuenow')
-    progressBar.style.width = ''
+    progressMeter.removeAttribute('value')
+  } else {
+    progressTrack.classList.add('is-determinate')
+    progressMeter.value = safeProgress
   }
 }
 
-if (window.desktopRuntime) {
-  window.desktopRuntime.onStatus(renderStatus)
+if (globalThis.desktopRuntime) {
+  globalThis.desktopRuntime.onStatus(renderStatus)
 
   retry.addEventListener('click', async () => {
     retry.disabled = true
     try {
-      await window.desktopRuntime.retry()
+      await globalThis.desktopRuntime.retry()
     } catch {
       // The restart channel rejected the request (for example when the page
       // no longer matches the trusted loading URL); keep the button usable.
@@ -82,7 +91,7 @@ if (window.desktopRuntime) {
     }
   })
 } else {
-  const demoState = new URLSearchParams(window.location.search).get('demo')
+  const demoState = new URLSearchParams(globalThis.location.search).get('demo')
   const demos = {
     environment: {
       message: '正在检查运行环境',

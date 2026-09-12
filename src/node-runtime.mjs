@@ -214,10 +214,12 @@ export async function downloadArchive(
   try {
     response = await fetchImpl(url, { redirect: 'follow', signal })
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError'
     throw new Error(
-      error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      timedOut
         ? `下载 Node.js 超时(超过 ${Math.round(timeoutMs / 60_000)} 分钟),请检查网络后重试。`
-        : `下载 Node.js 失败：${error instanceof Error ? error.message : String(error)}`,
+        : `下载 Node.js 失败：${reason}`,
     )
   }
   if (!response.ok || !response.body) {
