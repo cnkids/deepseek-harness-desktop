@@ -117,7 +117,7 @@ npm start
 | 网络自适应 | 初始化默认走官方源，探测不通时自动回退国内镜像，也可用环境变量指定私有源 |
 | 安全校验 | 下载的 Node.js 官方归档通过固定 SHA-256 校验后才会安装 |
 | 自动同步 | 启动时查询 npm registry（官方源优先，不可达时自动改用国内镜像），并在用户全局环境或应用私有环境中原位更新 DSH |
-| 命令行可用 | Harness 页面右下角的「命令行」按钮（以及托盘菜单同名项）可打开一个已注入私有 Node.js 与全局 `dsh` 的终端，没装 Node.js 也能执行 `dsh plugin` 等全局命令 |
+| 命令行可用 | 托盘菜单可打开一个已注入私有 Node.js 与全局 `dsh` 的终端，没装 Node.js 也能执行 `dsh plugin` 等全局命令 |
 | 桌面端自动更新 | 通过 Release 里的更新清单自动检查、下载并校验新版安装包，失败不影响当前版本运行；忽略的更新提示会过期，不会屏蔽更新的版本 |
 | 本地优先 | Harness 服务绑定 `127.0.0.1`，工作状态与缓存保存在本机 |
 | 最小权限 | 页面权限默认拒绝（剪贴板写入除外），窗口只允许导航到本地启动页与当前 Harness，重启通道仅对启动页开放 |
@@ -147,9 +147,35 @@ npm start
 
 托管 runtime 位于 Electron 的 `userData` 目录。桌面端不会覆盖 `DSH_HOME`：默认与命令行共用 `~/.dsh`，因此通过 `dsh plugin --profile web add ...` 安装的插件会在桌面端下次启动时生效（安装后需要重启应用）；如果启动环境显式设置了 `DSH_HOME`，桌面端会原样继承。
 
-本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。这时点击 Harness 页面**右下角的「命令行」按钮**（或托盘菜单里的「打开 Harness 命令行（安装插件）」），它会打开一个已把私有 Node.js 与全局 `dsh` 目录前置进 `PATH` 的终端窗口，在窗口里执行插件安装命令即可。该窗口不修改系统 `PATH`，也独立于应用生命周期。
+本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。这时请从托盘菜单选择「打开 Harness 命令行（安装插件）」，它会打开一个已把私有 Node.js 与全局 `dsh` 目录前置进 `PATH` 的终端窗口，在窗口里执行插件安装命令即可。该窗口不修改系统 `PATH`，也独立于应用生命周期。
 
-页面内按钮只在 Harness 页面上出现（启动页不显示），由 preload 在隔离环境注入：相关 IPC 通道没有经 `contextBridge` 暴露给页面脚本，且只接受真实用户点击，主进程还会校验请求来自窗口顶层框架且仍在当前 Harness origin 内——第三方页面代码无法自行拉起终端。
+### 在自己的终端里使用 dsh
+
+上面的托盘入口每次都要从应用里点开。如果你希望**在自己的终端里直接**敲 `dsh plugin --profile web add ...`，可以自行安装一份 Node.js：应用会改用系统 Node.js，并把 `@deepseek-ai/dsh` 装进你自己的 npm 全局环境。有两个前提必须注意，否则装了也不生效：
+
+1. **版本要落在兼容范围内**：`^22.19.0 || >=24.0.0`，也就是 22.19.0 及以上的 22.x，或 24.x 及以上。20.x 与 23.x 都不被接受——应用会判定本机没有兼容的 Node.js，转而继续使用私有 runtime。建议直接装 24.x LTS。
+2. **应用优先复用已经存在的私有 runtime**：一旦应用下载过私有 runtime（`userData/runtime`），只安装 Node.js 并不会改变它的选择。必须先删掉该目录，应用才会重新探测系统 Node.js。
+
+以 Windows 为例：
+
+```bat
+:: 1. 安装 Node.js 24.x（官方 MSI；zip 便携版或 nvm4w 需自行确认 PATH）
+node -v                        :: 2. 确认版本落在兼容范围内
+:: 3. 退出应用，然后删除私有 runtime
+rmdir /s /q "%APPDATA%\DeepSeek Harness Desktop\runtime"
+:: 4. 重新打开应用，等首次启动流程走完（它会用系统 Node.js 安装/更新 dsh）
+where dsh                      :: 5. 应指向 %APPDATA%\npm\dsh.cmd
+dsh plugin --profile web add github:cnkids/dsh-office-toolkit
+```
+
+macOS 与 Linux 对应删除：
+
+```sh
+rm -rf "$HOME/Library/Application Support/DeepSeek Harness Desktop/runtime"  # macOS
+rm -rf "$HOME/.config/DeepSeek Harness Desktop/runtime"                       # Linux
+```
+
+`dsh` 与 `node` 的可执行文件位置由 npm 全局前缀决定（Windows 通常是 `%APPDATA%\npm`，官方安装包已把它加入 `PATH`；zip 便携版与 nvm4w 需自行确认）。也可以用 `DSH_DESKTOP_NODE` 指定 Node.js 绝对路径来强制使用系统 Node.js——它同时会绕过“私有 runtime 优先”和启动缓存。如果之后系统 Node.js 被卸载或版本变得不兼容，应用会重新下载并使用私有 runtime，`dsh` 也随之回到私有目录。
 
 打包后的应用以用户的“文档”目录作为默认工作目录；开发模式使用当前项目目录。
 
@@ -207,9 +233,14 @@ npm run release -- 0.3.0
 
 ## 版本记录
 
+### 0.2.4
+
+- 撤回 0.2.3 在 Harness 页面里注入的「命令行」按钮：这个入口更适合用文档与托盘菜单承载，托盘菜单里的「打开 Harness 命令行（安装插件）」保留不变。
+- README 新增「在自己的终端里使用 dsh」章节：写清兼容的 Node.js 版本范围（`^22.19.0 || >=24.0.0`）、应用“优先复用已有私有 runtime”的探测顺序会导致装了 Node.js 也不生效，以及删除 `userData/runtime` 后重启用系统 Node.js 的完整步骤（含 Windows 命令与 `DSH_DESKTOP_NODE` 覆盖方式）。
+
 ### 0.2.3
 
-- Harness 页面右下角新增「命令行」按钮，点一下就能打开已注入私有 Node.js 与全局 `dsh` 的终端，不用再去托盘菜单里找入口（托盘菜单的同名项保留）。
+- Harness 页面右下角新增「命令行」按钮，点一下就能打开已注入私有 Node.js 与全局 `dsh` 的终端，不用再去托盘菜单里找入口（托盘菜单的同名项保留）。该按钮已在 0.2.4 撤回，入口改由文档与托盘菜单承载。
 - 按钮由 preload 注入到 Harness 页面：IPC 通道不经 `contextBridge` 暴露、只接受真实用户点击（拒绝 `element.click()` 这类合成事件），主进程另校验发送方是窗口顶层框架且仍在当前 Harness origin 内，避免第三方页面代码自行拉起终端。
 - 启动页（`file://`）不显示该按钮。
 

@@ -59,16 +59,3 @@ export function isTrustedIpcSender(senderFrame, loadingHtmlPath) {
       isStartupPageUrl(senderFrame.url, loadingHtmlPath),
   )
 }
-
-// 「打开命令行」按钮只由 preload 注入到 Harness 页面：通道没有经
-// contextBridge 暴露，preload 也拒绝合成点击，但主进程仍然要确认请求来自
-// 窗口顶层框架，并且仍在当前 Harness origin 内。
-export function isTrustedHarnessSender(senderFrame, harnessOrigin) {
-  if (!senderFrame || senderFrame.parent || !harnessOrigin) return false
-  if (typeof senderFrame.url !== 'string') return false
-  try {
-    return new URL(senderFrame.url).origin === harnessOrigin
-  } catch {
-    return false
-  }
-}
