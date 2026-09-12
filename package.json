@@ -20,6 +20,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
+    "pretest:coverage": "node -e \"require('node:fs').mkdirSync('coverage', { recursive: true })\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
     "check:environment": "node scripts/check-environment.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",

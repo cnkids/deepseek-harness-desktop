@@ -158,24 +158,32 @@ async function packageFromBin(binPath, source) {
   )
 }
 
-async function findPathInstallation(platform, env) {
+async function findPathCandidates(platform, env) {
   const candidates = []
   if (env.DSH_DESKTOP_DSH) candidates.push(env.DSH_DESKTOP_DSH)
 
   if (platform === 'win32') {
     const output = await commandOutput('where.exe', ['dsh.cmd'], { env })
     if (output) candidates.push(...output.split(/\r?\n/))
-  } else {
-    const direct = await commandOutput('/usr/bin/env', ['sh', '-c', 'command -v dsh'], { env })
-    if (direct) candidates.push(direct)
-    const shell = env.SHELL
-    if (shell && path.isAbsolute(shell)) {
-      const login = await commandOutput(shell, ['-lic', 'command -v dsh'], { env })
-      if (login) candidates.push(login.split(/\r?\n/).at(-1))
-    }
+    return candidates
   }
 
-  for (const candidate of [...new Set(candidates.map((item) => item.trim()).filter(Boolean))]) {
+  const direct = await commandOutput('/usr/bin/env', ['sh', '-c', 'command -v dsh'], { env })
+  if (direct) candidates.push(direct)
+  const shell = env.SHELL
+  if (shell && path.isAbsolute(shell)) {
+    const login = await commandOutput(shell, ['-lic', 'command -v dsh'], { env })
+    if (login) candidates.push(login.split(/\r?\n/).at(-1))
+  }
+  return candidates
+}
+
+async function findPathInstallation(platform, env) {
+  const candidates = new Set(
+    (await findPathCandidates(platform, env)).map((item) => item.trim()).filter(Boolean),
+  )
+
+  for (const candidate of candidates) {
     const installation = await packageFromBin(candidate, 'path')
     if (installation) return { ...installation, binDir: path.dirname(candidate) }
   }

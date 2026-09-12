@@ -412,14 +412,15 @@ async function launchHarness() {
     dshProcess = null
     harnessOrigin = null
     harnessLaunchUrl = null
-    void mainWindow.loadFile(LOADING_HTML_PATH).then(() => {
-      emitStatus(
-        'Harness 已停止',
-        `后台进程意外退出（${signal ?? `代码 ${code ?? '未知'}`}）。`,
-        null,
-        true,
-      )
-    })
+    const exitReason = signal ?? `代码 ${code ?? '未知'}`
+    mainWindow
+      .loadFile(LOADING_HTML_PATH)
+      .then(() => {
+        emitStatus('Harness 已停止', `后台进程意外退出（${exitReason}）。`, null, true)
+      })
+      .catch((error) => {
+        console.warn('[dsh] unable to restore the loading page', error)
+      })
   })
 
   emitStatus(

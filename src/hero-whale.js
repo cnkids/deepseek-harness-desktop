@@ -1,3 +1,5 @@
+import { createPixelData } from './hero-pixels.mjs'
+
 const stage = document.querySelector('#hero-whale-stage')
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const lowPowerDevice =
@@ -20,103 +22,6 @@ function initializeHeroWhale(THREE) {
   const smoothedPointer = new THREE.Vector2(0, 0)
   let visible = true
   let lastFrame = 0
-
-  function createPixelData(image, size = 60) {
-    const source = document.createElement('canvas')
-    source.width = size
-    source.height = size
-    const context = source.getContext('2d')
-    context.fillStyle = '#000'
-    context.fillRect(0, 0, size, size)
-
-    const scale = Math.min(size / image.width, size / image.height)
-    const width = image.width * scale
-    const height = image.height * scale
-    context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height)
-
-    const pixels = context.getImageData(0, 0, size, size)
-    const luminance = new Float32Array(size * size)
-    const positions = []
-    const scatteredPositions = []
-    const opacities = []
-    const edges = []
-    const center = size / 2
-
-    for (let index = 0; index < size * size; index += 1) {
-      const pixel = index * 4
-      luminance[index] =
-        (0.299 * pixels.data[pixel] +
-          0.587 * pixels.data[pixel + 1] +
-          0.114 * pixels.data[pixel + 2]) /
-        255
-    }
-
-    function hasEmptyNeighbour(x, y) {
-      for (let offsetY = -2; offsetY <= 2; offsetY += 1) {
-        for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
-          if (offsetX === 0 && offsetY === 0) continue
-          const neighbourX = x + offsetX
-          const neighbourY = y + offsetY
-          if (
-            neighbourX < 0 ||
-            neighbourY < 0 ||
-            neighbourX >= size ||
-            neighbourY >= size ||
-            luminance[neighbourY * size + neighbourX] <= 0.2
-          ) {
-            return true
-          }
-        }
-      }
-      return false
-    }
-
-    for (let y = 0; y < size; y += 1) {
-      for (let x = 0; x < size; x += 1) {
-        const opacity = luminance[y * size + x]
-        if (opacity <= 0.2 || !hasEmptyNeighbour(x, y)) continue
-
-        positions.push((x - center) * 0.18, (center - y) * 0.18, 0)
-        opacities.push(opacity)
-
-        let emptyNeighbours = 0
-        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-            if (offsetX === 0 && offsetY === 0) continue
-            const neighbourX = x + offsetX
-            const neighbourY = y + offsetY
-            if (
-              neighbourX < 0 ||
-              neighbourY < 0 ||
-              neighbourX >= size ||
-              neighbourY >= size ||
-              luminance[neighbourY * size + neighbourX] <= 0.2
-            ) {
-              emptyNeighbours += 1
-            }
-          }
-        }
-        edges.push(emptyNeighbours / 8)
-
-        const azimuth = Math.random() * Math.PI * 2
-        const polar = Math.acos(2 * Math.random() - 1)
-        const radius = 3 * (0.4 + 0.6 * Math.random())
-        scatteredPositions.push(
-          Math.sin(polar) * Math.cos(azimuth) * radius,
-          Math.sin(polar) * Math.sin(azimuth) * radius,
-          Math.cos(polar) * radius * 0.5,
-        )
-      }
-    }
-
-    return {
-      positions: new Float32Array(positions),
-      scatteredPositions: new Float32Array(scatteredPositions),
-      opacities: new Float32Array(opacities),
-      edges: new Float32Array(edges),
-      count: positions.length / 3,
-    }
-  }
 
   function createScene(pixelData) {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: !lowPowerDevice })
