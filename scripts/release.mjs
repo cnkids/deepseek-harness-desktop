@@ -70,4 +70,4 @@ run('git', ['tag', '-a', tag, '-m', `DeepSeek Harness Desktop ${tag}`], { mutate
 run('git', ['push', 'origin', 'main', tag], { mutates: true })
 
 console.log(`${dryRun ? 'Would publish' : 'Published'} ${tag}. Follow the workflow at:`)
-console.log(`https://github.com/atlantis-mk/deepseek-harness-desktop/actions/workflows/release.yml`)
+console.log(`https://github.com/cnkids/deepseek-harness-desktop/actions/workflows/release.yml`)

@@ -7,13 +7,13 @@
     "email": "atlanxg@gmail.com"
   },
   "license": "MIT",
-  "homepage": "https://github.com/atlantis-mk/deepseek-harness-desktop#readme",
+  "homepage": "https://github.com/cnkids/deepseek-harness-desktop#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/atlantis-mk/deepseek-harness-desktop.git"
+    "url": "git+https://github.com/cnkids/deepseek-harness-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/atlantis-mk/deepseek-harness-desktop/issues"
+    "url": "https://github.com/cnkids/deepseek-harness-desktop/issues"
   },
   "type": "module",
   "main": "src/main.mjs",

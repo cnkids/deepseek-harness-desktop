@@ -68,7 +68,7 @@ if (isCliEntry) {
     output: option('--output'),
     version: option('--version'),
     baseUrl: option('--base-url'),
-    repository: option('--repository') ?? 'atlantis-mk/deepseek-harness-desktop',
+    repository: option('--repository') ?? 'cnkids/deepseek-harness-desktop',
   }
   if (!args.input || !args.output || !args.version || !args.baseUrl) {
     console.error('Usage: create-release-manifest.mjs --input DIR --output FILE --version X.Y.Z --base-url URL [--repository OWNER/REPO]')

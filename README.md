@@ -8,9 +8,9 @@
 <p align="center"><sub>社区维护的开源项目，并非 DeepSeek 官方产品。</sub></p>
 
 <p align="center">
-  <a href="https://github.com/atlantis-mk/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/atlantis-mk/deepseek-harness-desktop?style=flat&amp;label=release&amp;color=4D6BFE" alt="Latest release"></a>
-  <a href="https://github.com/atlantis-mk/deepseek-harness-desktop/releases"><img src="https://img.shields.io/github/downloads/atlantis-mk/deepseek-harness-desktop/total?style=flat&amp;label=downloads&amp;color=4D6BFE" alt="Total downloads"></a>
-  <a href="https://github.com/atlantis-mk/deepseek-harness-desktop/actions/workflows/release.yml"><img src="https://github.com/atlantis-mk/deepseek-harness-desktop/actions/workflows/release.yml/badge.svg" alt="Build status"></a>
+  <a href="https://github.com/cnkids/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/cnkids/deepseek-harness-desktop?style=flat&amp;label=release&amp;color=4D6BFE" alt="Latest release"></a>
+  <a href="https://github.com/cnkids/deepseek-harness-desktop/releases"><img src="https://img.shields.io/github/downloads/cnkids/deepseek-harness-desktop/total?style=flat&amp;label=downloads&amp;color=4D6BFE" alt="Total downloads"></a>
+  <a href="https://github.com/cnkids/deepseek-harness-desktop/actions/workflows/release.yml"><img src="https://github.com/cnkids/deepseek-harness-desktop/actions/workflows/release.yml/badge.svg" alt="Build status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat" alt="Supported platforms: macOS, Windows and Linux">
 </p>
@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://blog.atlankj.com/products/deepseek-harness-desktop"><strong>产品介绍与下载</strong></a>
   ·
-  <a href="https://github.com/atlantis-mk/deepseek-harness-desktop/releases/latest">GitHub Releases</a>
+  <a href="https://github.com/cnkids/deepseek-harness-desktop/releases/latest">GitHub Releases</a>
   ·
   <a href="https://blog.atlankj.com/products/deepseek-harness-desktop/ai.md">AI 安装文档</a>
 </p>
@@ -35,7 +35,7 @@ DeepSeek Harness Desktop 是面向 macOS、Windows 和 Linux 的非官方桌面�
 
 ## 下载与安装
 
-推荐前往[产品介绍页](https://blog.atlankj.com/products/deepseek-harness-desktop)自动识别系统并下载，也可以从 [GitHub Releases](https://github.com/atlantis-mk/deepseek-harness-desktop/releases/latest) 获取安装包和 `SHA256SUMS.txt`。
+推荐前往[产品介绍页](https://blog.atlankj.com/products/deepseek-harness-desktop)自动识别系统并下载，也可以从 [GitHub Releases](https://github.com/cnkids/deepseek-harness-desktop/releases/latest) 获取安装包和 `SHA256SUMS.txt`。
 
 | 平台 | 系统要求 | 安装包 |
 | --- | --- | --- |
@@ -153,7 +153,7 @@ npm start
 需要 Node.js 24 和 npm。
 
 ```sh
-git clone https://github.com/atlantis-mk/deepseek-harness-desktop.git
+git clone https://github.com/cnkids/deepseek-harness-desktop.git
 cd deepseek-harness-desktop
 npm ci
 npm test
