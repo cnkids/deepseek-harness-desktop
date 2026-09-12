@@ -42,6 +42,7 @@ import { createHarnessConsoleLaunch, findLinuxTerminal } from './harness-console
 import {
   isAllowedNavigationUrl,
   isAllowedRendererPermission,
+  isTrustedHarnessSender,
   isTrustedIpcSender,
 } from './security-policy.mjs'
 import { readStartupCache, writeStartupCache } from './startup-cache.mjs'
@@ -1011,6 +1012,15 @@ ipcMain.handle('retry-startup', async (event) => {
     throw new Error('拒绝来自非启动页的重试请求。')
   }
   await startApplication()
+})
+
+ipcMain.handle('open-harness-console', async (event) => {
+  // 按钮由 preload 注入 Harness 页面，通道也没有经 contextBridge 暴露；
+  // 这里再确认请求来自窗口顶层框架，且仍在当前 Harness origin 内。
+  if (!isTrustedHarnessSender(event.senderFrame, harnessOrigin)) {
+    throw new Error('拒绝来自非 Harness 页面的命令行请求。')
+  }
+  await openHarnessConsole()
 })
 
 app.on('before-quit', () => {

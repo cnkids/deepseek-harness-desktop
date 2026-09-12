@@ -6,6 +6,7 @@ import {
   isAllowedNavigationUrl,
   isAllowedRendererPermission,
   isStartupPageUrl,
+  isTrustedHarnessSender,
   isTrustedIpcSender,
 } from '../src/security-policy.mjs'
 
@@ -48,6 +49,22 @@ test('trusts restart IPC only from the loading page frame', () => {
   assert.equal(isTrustedIpcSender(frame(`${harnessOrigin}/`), loadingHtmlPath), false)
   assert.equal(isTrustedIpcSender(frame('file:///tmp/other.html'), loadingHtmlPath), false)
   assert.equal(isTrustedIpcSender(null, loadingHtmlPath), false)
+})
+
+test('trusts the console channel only from the Harness top frame', () => {
+  const frame = (url, parent = null) => ({ url, parent })
+  assert.equal(isTrustedHarnessSender(frame(`${harnessOrigin}/chat`), harnessOrigin), true)
+  assert.equal(isTrustedHarnessSender(frame(`${harnessOrigin}/`), harnessOrigin), true)
+  // 子框架不能借这个通道拉起终端。
+  assert.equal(
+    isTrustedHarnessSender(frame(`${harnessOrigin}/chat`, {}), harnessOrigin),
+    false,
+  )
+  assert.equal(isTrustedHarnessSender(frame('http://127.0.0.1:9999/'), harnessOrigin), false)
+  assert.equal(isTrustedHarnessSender(frame(loadingFileUrl), harnessOrigin), false)
+  assert.equal(isTrustedHarnessSender(frame('not a url'), harnessOrigin), false)
+  assert.equal(isTrustedHarnessSender(null, harnessOrigin), false)
+  assert.equal(isTrustedHarnessSender(frame(`${harnessOrigin}/`), null), false)
 })
 
 test('denies system permissions except clipboard writes', () => {
