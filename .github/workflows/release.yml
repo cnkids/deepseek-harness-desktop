@@ -117,6 +117,12 @@ jobs:
       TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.12.0
+          cache: npm
+      - run: npm ci
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -125,6 +131,13 @@ jobs:
       - name: Create checksums
         working-directory: ${{ runner.temp }}/release-assets
         run: sha256sum *.dmg *.zip *.exe *.AppImage *.deb 2>/dev/null | sort > SHA256SUMS.txt
+      - name: Create update manifest
+        run: |
+          node scripts/create-release-manifest.mjs \
+            --input "$RUNNER_TEMP/release-assets" \
+            --output "$RUNNER_TEMP/release-assets/latest.json" \
+            --version "$VERSION" \
+            --repository "$GITHUB_REPOSITORY"
       - name: Create release and upload assets
         run: |
           set -euo pipefail
@@ -142,103 +155,4 @@ jobs:
             echo "## DeepSeek Harness Desktop $TAG"
             echo
             echo "[GitHub Release](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  r2-release:
-    name: Mirror immutable assets to Cloudflare R2
-    needs: [prepare, build, github-release]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
-      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ vars.R2_BUCKET }}
-      R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
-      VERSION: ${{ needs.prepare.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.12.0
-          cache: npm
-      - run: npm ci
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-*
-          path: ${{ runner.temp }}/release-assets
-          merge-multiple: true
-      - id: r2
-        name: Check R2 configuration
-        run: |
-          if [[ -n "$AWS_ACCESS_KEY_ID" && -n "$AWS_SECRET_ACCESS_KEY" && -n "$R2_ACCOUNT_ID" && -n "$R2_BUCKET" && -n "$R2_PUBLIC_BASE_URL" ]]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "R2 was skipped because one or more repository secrets/variables are missing." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - if: steps.r2.outputs.configured == 'true'
-        name: Create R2 release manifest
-        run: |
-          node scripts/create-release-manifest.mjs \
-            --input "$RUNNER_TEMP/release-assets" \
-            --output "$RUNNER_TEMP/latest.json" \
-            --version "$VERSION" \
-            --base-url "$R2_PUBLIC_BASE_URL" \
-            --repository "$GITHUB_REPOSITORY"
-      - if: steps.r2.outputs.configured == 'true'
-        name: Publish immutable version objects
-        run: |
-          set -euo pipefail
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          prefix="deepseek-harness-desktop/releases/v${VERSION}"
-          for source in "$RUNNER_TEMP/release-assets/"*; do
-            name="$(basename "$source")"
-            key="$prefix/$name"
-            sha256="$(sha256sum "$source" | cut -d ' ' -f 1)"
-            existing="$(aws s3api head-object --endpoint-url "$endpoint" --bucket "$R2_BUCKET" --key "$key" --query 'Metadata.sha256' --output text 2>/dev/null || true)"
-            if [[ -n "$existing" && "$existing" != "None" ]]; then
-              [[ "$existing" == "$sha256" ]] || {
-                echo "Refusing to overwrite immutable object with different content: $key" >&2
-                exit 1
-              }
-              echo "Immutable object already matches: $key"
-              continue
-            fi
-            aws s3 cp "$source" "s3://${R2_BUCKET}/${key}" \
-              --endpoint-url "$endpoint" \
-              --cache-control "public, max-age=31536000, immutable" \
-              --metadata "sha256=$sha256" \
-              --no-progress
-          done
-      - if: steps.r2.outputs.configured == 'true'
-        name: Publish latest manifest last and verify publicly
-        run: |
-          set -euo pipefail
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          key="deepseek-harness-desktop/latest.json"
-          aws s3 cp "$RUNNER_TEMP/latest.json" "s3://${R2_BUCKET}/${key}" \
-            --endpoint-url "$endpoint" \
-            --content-type "application/json" \
-            --cache-control "no-store, max-age=0" \
-            --no-progress
-          public_url="${R2_PUBLIC_BASE_URL%/}/${key}"
-          for attempt in {1..12}; do
-            if curl --fail --silent --show-error "$public_url" --output "$RUNNER_TEMP/public-latest.json" \
-              && cmp -s "$RUNNER_TEMP/latest.json" "$RUNNER_TEMP/public-latest.json"; then
-              break
-            fi
-            [[ "$attempt" != "12" ]] || {
-              echo "Public R2 manifest did not converge: $public_url" >&2
-              exit 1
-            }
-            sleep 5
-          done
-          {
-            echo "## Cloudflare R2 mirror"
-            echo
-            echo "[Latest manifest]($public_url)"
           } >> "$GITHUB_STEP_SUMMARY"

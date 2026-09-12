@@ -9,16 +9,16 @@ import semver from 'semver'
 
 const supportedExtensions = ['.dmg', '.zip', '.exe', '.AppImage', '.deb']
 
-export async function createReleaseManifest({ input, output, version, baseUrl, repository }) {
+export async function createReleaseManifest({ input, output, version, repository }) {
   if (!semver.valid(version)) throw new Error(`Invalid release version: ${version}`)
-  if (!/^https:\/\//.test(baseUrl)) throw new Error('baseUrl must be an HTTPS URL')
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error(`Invalid repository: ${repository}`)
 
   const names = (await readdir(input))
     .filter((name) => supportedExtensions.some((extension) => name.endsWith(extension)))
     .sort()
   if (names.length === 0) throw new Error(`No release assets found in ${input}`)
 
-  const releasePrefix = `${baseUrl.replace(/\/$/, '')}/deepseek-harness-desktop/releases/v${version}`
+  const releasePrefix = `https://github.com/${repository}/releases/download/v${version}`
   const assets = []
   for (const name of names) {
     const file = path.join(input, name)
@@ -67,11 +67,10 @@ if (isCliEntry) {
     input: option('--input'),
     output: option('--output'),
     version: option('--version'),
-    baseUrl: option('--base-url'),
     repository: option('--repository') ?? 'cnkids/deepseek-harness-desktop',
   }
-  if (!args.input || !args.output || !args.version || !args.baseUrl) {
-    console.error('Usage: create-release-manifest.mjs --input DIR --output FILE --version X.Y.Z --base-url URL [--repository OWNER/REPO]')
+  if (!args.input || !args.output || !args.version) {
+    console.error('Usage: create-release-manifest.mjs --input DIR --output FILE --version X.Y.Z [--repository OWNER/REPO]')
     process.exit(2)
   }
   await createReleaseManifest(args)

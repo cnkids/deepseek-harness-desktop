@@ -4,8 +4,9 @@ import { mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import semver from 'semver'
 
+// 更新清单随每个 GitHub Release 一起发布，`latest` 会自动跟随最新正式版本。
 export const DESKTOP_UPDATE_MANIFEST_URL =
-  'https://pub-bf5092e77ab5409ba39fb34c4a76c1b1.r2.dev/deepseek-harness-desktop/latest.json'
+  'https://github.com/cnkids/deepseek-harness-desktop/releases/latest/download/latest.json'
 
 const platformNames = {
   darwin: 'mac',

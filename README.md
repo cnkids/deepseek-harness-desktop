@@ -44,7 +44,7 @@ DeepSeek Harness Desktop 是面向 macOS、Windows 和 Linux 的非官方桌面�
 | Windows | Windows 10/11，`x64` | NSIS 安装程序 / 便携版 EXE |
 | Linux | 常见 `x86_64` 发行版 | AppImage / DEB |
 
-发布资产也会镜像到 Cloudflare R2，可通过[最新版清单](https://pub-bf5092e77ab5409ba39fb34c4a76c1b1.r2.dev/deepseek-harness-desktop/latest.json)查询版本、文件大小、下载地址与 SHA-256。
+每个 Release 都会附带一份更新清单，可通过[最新版清单](https://github.com/cnkids/deepseek-harness-desktop/releases/latest/download/latest.json)查询版本、文件大小、下载地址与 SHA-256。
 
 安装后的桌面端会自动读取这份清单：启动后检查新版本，并每 6 小时复查一次。发现新版时会在后台下载与校验对应平台的安装包，完成后提示安装；也可以从系统托盘手动检查。Windows 会退出后启动 NSIS 安装程序，Linux AppImage 会原位替换并重启，DEB 与 macOS DMG 会交给系统安装界面处理。被忽略的更新提示会在 48 小时后过期，不会长期屏蔽后续版本。
 
@@ -117,7 +117,7 @@ npm start
 | 网络自适应 | 初始化默认走官方源，探测不通时自动回退国内镜像，也可用环境变量指定私有源 |
 | 安全校验 | 下载的 Node.js 官方归档通过固定 SHA-256 校验后才会安装 |
 | 自动同步 | 启动时查询 npm registry（官方源优先，不可达时自动改用国内镜像），并在用户全局环境或应用私有环境中原位更新 DSH |
-| 桌面端自动更新 | 通过 R2 清单自动检查、下载并校验新版安装包，失败不影响当前版本运行；忽略的更新提示会过期，不会屏蔽更新的版本 |
+| 桌面端自动更新 | 通过 Release 里的更新清单自动检查、下载并校验新版安装包，失败不影响当前版本运行；忽略的更新提示会过期，不会屏蔽更新的版本 |
 | 本地优先 | Harness 服务绑定 `127.0.0.1`，工作状态与缓存保存在本机 |
 | 最小权限 | 页面权限默认拒绝（剪贴板写入除外），窗口只允许导航到本地启动页与当前 Harness，重启通道仅对启动页开放 |
 | 启动可视化 | 展示运行环境、版本同步、插件装载和界面就绪四个阶段 |
@@ -194,11 +194,17 @@ DSH_DESKTOP_NODE=/absolute/path/to/node npm start
 npm run release -- 0.3.0
 ```
 
-脚本会更新版本、运行测试、创建 release commit 和 `v0.3.0` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要并创建 GitHub Release；配置 R2 凭据后，还会同步不可变的版本资产。
+脚本会更新版本、运行测试、创建 release commit 和 `v0.3.0` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要、写出自动更新清单 `latest.json` 并创建 GitHub Release。
 
 完整配置与发布流程见[发布说明](docs/releasing.md)。
 
 ## 版本记录
+
+### 0.2.1
+
+- 应用内自动更新改用 GitHub Releases 作为更新源：更新清单 `latest.json` 随 Release 一起发布，客户端读取固定地址 `https://github.com/cnkids/deepseek-harness-desktop/releases/latest/download/latest.json`，不再依赖 Cloudflare R2 与额外的仓库密钥。
+- 发布工作流在创建 Release 时生成并上传更新清单，原先需要 R2 凭据才会执行的镜像作业已移除。
+- 注意：已经安装 0.2.0 及更早版本的客户端内置的是旧 R2 清单地址，需要手动下载安装包升级一次，之后的自动更新才会走新地址；由于清单与安装包都由 GitHub 提供，网络受限环境下检查与下载可能需要代理。
 
 ### 0.2.0
 

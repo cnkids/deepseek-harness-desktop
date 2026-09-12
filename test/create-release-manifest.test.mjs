@@ -22,15 +22,31 @@ test('creates a stable manifest for supported release assets', async () => {
     input: directory,
     output,
     version: '1.2.3',
-    baseUrl: 'https://downloads.example.com/',
     repository: 'owner/repo',
   })
 
   assert.equal(manifest.version, '1.2.3')
   assert.deepEqual(manifest.assets.map((asset) => asset.name), ['app.dmg', 'app.exe'])
-  assert.equal(manifest.assets[0].url, 'https://downloads.example.com/deepseek-harness-desktop/releases/v1.2.3/app.dmg')
+  assert.equal(
+    manifest.assets[0].url,
+    'https://github.com/owner/repo/releases/download/v1.2.3/app.dmg',
+  )
+  assert.equal(manifest.githubRelease, 'https://github.com/owner/repo/releases/tag/v1.2.3')
   assert.equal(manifest.assets[0].sha256.length, 64)
   assert.deepEqual(JSON.parse(await readFile(output, 'utf8')), manifest)
+})
+
+test('rejects a repository that is not owner/name', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'dsh-release-repo-'))
+  await assert.rejects(
+    createReleaseManifest({
+      input: directory,
+      output: path.join(directory, 'latest.json'),
+      version: '1.2.3',
+      repository: 'not-a-repository',
+    }),
+    /Invalid repository/,
+  )
 })
 
 test('rejects releases without installable assets', async () => {
@@ -40,7 +56,6 @@ test('rejects releases without installable assets', async () => {
       input: directory,
       output: path.join(directory, 'latest.json'),
       version: '1.2.3',
-      baseUrl: 'https://downloads.example.com',
       repository: 'owner/repo',
     }),
     /No release assets/,
@@ -78,8 +93,8 @@ test('CLI entry detection works from a path containing spaces', async (t) => {
         outputFile,
         '--version',
         '9.9.9',
-        '--base-url',
-        'https://downloads.example.com',
+        '--repository',
+        'owner/repo',
       ],
       { encoding: 'utf8' },
     )
@@ -87,6 +102,10 @@ test('CLI entry detection works from a path containing spaces', async (t) => {
     const manifest = JSON.parse(await readFile(outputFile, 'utf8'))
     assert.equal(manifest.version, '9.9.9')
     assert.equal(manifest.assets.length, 1)
+    assert.equal(
+      manifest.assets[0].url,
+      'https://github.com/owner/repo/releases/download/v9.9.9/app.dmg',
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }
