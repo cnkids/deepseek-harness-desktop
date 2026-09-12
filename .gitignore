@@ -11,3 +11,5 @@ coverage/
 .design-reference-*.png
 .qa-*.png
 design-qa.md
+/.agents
+AGENTS.md
