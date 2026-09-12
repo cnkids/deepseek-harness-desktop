@@ -42,7 +42,12 @@
     "asar": true,
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/three/build/three.cjs",
+      "!node_modules/three/build/three.module.js",
+      "!node_modules/three/build/three.webgpu*.js",
+      "!node_modules/three/examples/**",
+      "!node_modules/three/src/**"
     ],
     "mac": {
       "icon": "build/icon.icns",
@@ -55,8 +60,12 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ]
+    },
+    "portable": {
+      "artifactName": "DeepSeek-Harness-Desktop-${version}-portable-${arch}.${ext}"
     },
     "linux": {
       "icon": "build/icon.png",

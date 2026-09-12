@@ -41,14 +41,23 @@ DeepSeek Harness Desktop 是面向 macOS、Windows 和 Linux 的非官方桌面�
 | --- | --- | --- |
 | macOS Apple Silicon | macOS 10.15+，`arm64` | DMG / ZIP |
 | macOS Intel | macOS 10.15+，`x64` | DMG / ZIP |
-| Windows | Windows 10/11，`x64` | NSIS 安装程序 |
+| Windows | Windows 10/11，`x64` | NSIS 安装程序 / 便携版 EXE |
 | Linux | 常见 `x86_64` 发行版 | AppImage / DEB |
 
 发布资产也会镜像到 Cloudflare R2，可通过[最新版清单](https://pub-bf5092e77ab5409ba39fb34c4a76c1b1.r2.dev/deepseek-harness-desktop/latest.json)查询版本、文件大小、下载地址与 SHA-256。
 
 安装后的桌面端会自动读取这份清单：启动后检查新版本，并每 6 小时复查一次。发现新版时会在后台下载与校验对应平台的安装包，完成后提示安装；也可以从系统托盘手动检查。Windows 会退出后启动 NSIS 安装程序，Linux AppImage 会原位替换并重启，DEB 与 macOS DMG 会交给系统安装界面处理。
 
+Windows 还提供文件名带 `-portable-` 的免安装版：双击即可运行，不创建开始菜单项或卸载记录，适合快速试用或放在 U 盘中携带。便携版同样把私有 Node.js 运行时与 Harness 缓存保存在 `%APPDATA%\DeepSeek Harness Desktop`，并沿用同一套桌面端自动更新流程；自动更新始终选择 NSIS 安装程序，不会用便携版覆盖已安装的版本。
+
 > 当前安装包尚未进行 Apple notarization 或 Windows Authenticode 签名，系统可能显示“未知开发者”或类似提示。请确认下载来源，并在安装前核对 SHA-256。
+
+### Windows 运行提示
+
+**问题：弹出“Windows 已保护你的电脑”，无法运行安装程序或便携版。**
+
+解决方案：点击“更多信息”，再点击“仍要运行”。安装包与便携版都未做 Authenticode 代码签名，首次运行必然触发 SmartScreen；请先核对发布页提供的 SHA-256 再放行。
+
 
 ### macOS 安装错误
 

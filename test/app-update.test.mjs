@@ -25,13 +25,13 @@ function manifest(version = '1.2.3') {
         url: `https://downloads.example.com/${version}/mac-arm64.dmg`,
       },
       {
-        name: `DeepSeek-Harness-Desktop-${version}-linux-x86_64.AppImage`,
+        name: `DeepSeek-Harness-Desktop-${version}-linux-x64.AppImage`,
         size: contents.length,
         sha256,
         url: `https://downloads.example.com/${version}/linux-x64.AppImage`,
       },
       {
-        name: `DeepSeek-Harness-Desktop-${version}-linux-amd64.deb`,
+        name: `DeepSeek-Harness-Desktop-${version}-linux-x64.deb`,
         size: contents.length,
         sha256,
         url: `https://downloads.example.com/${version}/linux-x64.deb`,
@@ -42,23 +42,39 @@ function manifest(version = '1.2.3') {
         sha256,
         url: `https://downloads.example.com/${version}/win-x64.exe`,
       },
+      {
+        name: `DeepSeek-Harness-Desktop-${version}-portable-x64.exe`,
+        size: contents.length,
+        sha256,
+        url: `https://downloads.example.com/${version}/portable-x64.exe`,
+      },
     ],
   }
 }
 
 test('validates manifests and selects the native package', () => {
   const release = parseReleaseManifest(manifest())
-  assert.match(selectReleaseAsset(release, { platform: 'darwin', arch: 'arm64' }).name, /\.dmg$/)
-  assert.match(
+  assert.equal(
+    selectReleaseAsset(release, { platform: 'darwin', arch: 'arm64' }).name,
+    'DeepSeek-Harness-Desktop-1.2.3-mac-arm64.dmg',
+  )
+  // electron-builder 的 ${arch} 宏在 Linux 上同样是 x64/arm64：改名会让
+  // 桌面端自动更新永远找不到安装包，这里锁定真实产物名。
+  assert.equal(
     selectReleaseAsset(release, { platform: 'linux', arch: 'x64', isAppImage: true }).name,
-    /\.AppImage$/,
+    'DeepSeek-Harness-Desktop-1.2.3-linux-x64.AppImage',
   )
-  assert.match(
+  assert.equal(
     selectReleaseAsset(release, { platform: 'linux', arch: 'x64', isAppImage: false }).name,
-    /\.deb$/,
+    'DeepSeek-Harness-Desktop-1.2.3-linux-x64.deb',
   )
-  assert.match(selectReleaseAsset(release, { platform: 'win32', arch: 'x64' }).name, /\.exe$/)
+  // 免安装版与安装版同名时会互相覆盖，自动更新必须只挑 NSIS 安装包。
+  assert.equal(
+    selectReleaseAsset(release, { platform: 'win32', arch: 'x64' }).name,
+    'DeepSeek-Harness-Desktop-1.2.3-win-x64.exe',
+  )
   assert.equal(selectReleaseAsset(release, { platform: 'win32', arch: 'arm64' }), null)
+  assert.equal(selectReleaseAsset(release, { platform: 'linux', arch: 'arm64' }), null)
   assert.throws(() => parseReleaseManifest({ ...manifest(), schemaVersion: 2 }), /不受支持/)
   const unsafe = manifest()
   unsafe.assets[0].name = '../update.dmg'

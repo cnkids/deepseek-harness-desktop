@@ -53,11 +53,11 @@ export function selectReleaseAsset(manifest, { platform, arch, isAppImage = fals
   } else if (platform === 'win32') {
     packageNames = [`${arch}.exe`]
   } else {
-    const appImageArch = arch === 'x64' ? 'x86_64' : 'arm64'
-    const debArch = arch === 'x64' ? 'amd64' : 'arm64'
+    // artifactName 使用 electron-builder 的 ${arch} 宏，它在 Linux 上同样是
+    // x64/arm64，而不是 deb 元数据里的 amd64 或 AppImage 惯用的 x86_64。
     packageNames = isAppImage
-      ? [`${appImageArch}.AppImage`, `${debArch}.deb`]
-      : [`${debArch}.deb`, `${appImageArch}.AppImage`]
+      ? [`${arch}.AppImage`, `${arch}.deb`]
+      : [`${arch}.deb`, `${arch}.AppImage`]
   }
 
   for (const packageName of packageNames) {

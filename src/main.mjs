@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, readdir, rename, rm } from 'node:fs/promises'
+import { chmod, copyFile, readdir, rename, rm, stat } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +51,10 @@ const DSH_UPDATE_RETRY_INTERVAL_MS = 5 * 60_000
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
 const DESKTOP_UPDATE_READY_MAX_AGE_MS = 48 * 60 * 60_000
 const LOADING_HTML_PATH = path.join(__dirname, 'loading.html')
+// electron-builder 的便携版会把可执行文件所在目录写入该变量。便携版不能像
+// 安装版那样用 NSIS 安装包覆盖自己，因此只提示手动下载新版本。
+const IS_PORTABLE_BUILD =
+  process.platform === 'win32' && Boolean(process.env.PORTABLE_EXECUTABLE_DIR)
 
 let mainWindow = null
 let tray = null
@@ -218,6 +222,22 @@ function stopHarness() {
   const child = dshProcess
   dshProcess = null
   if (!child || child.killed) return
+
+  // Windows 没有面向子进程的进程组信号：child.kill('SIGTERM') 只会结束直接
+  // 子进程，而 dsh web 还会派生自己的子进程，它们会在应用退出后变成孤儿进程
+  // 继续占用端口。taskkill /T 会连同整棵进程树一起结束。
+  if (process.platform === 'win32' && typeof child.pid === 'number') {
+    const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    killer.on('error', (error) => {
+      console.warn('[dsh] unable to terminate the harness process tree', error)
+      child.kill('SIGKILL')
+    })
+    return
+  }
+
   child.kill('SIGTERM')
   const timer = setTimeout(() => {
     if (child.exitCode === null) child.kill('SIGKILL')
@@ -265,6 +285,22 @@ async function prepareDshInstallation(nodeEnvironment, latestVersion, env, insta
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(`无法在${scopeLabel}安装 DeepSeek Harness：${reason}`)
   }
+}
+
+async function resolveWorkspacePath() {
+  // 打包后默认在用户的“文档”目录中运行 Harness。OneDrive 重定向、目录被删除
+  // 或组策略移除都会让 app.getPath 指向不存在的位置，导致 spawn 以 ENOENT
+  // 直接失败，因此依次回退到主目录与应用数据目录。
+  const candidates = app.isPackaged ? ['documents', 'home', 'userData'] : []
+  for (const name of candidates) {
+    try {
+      const directory = app.getPath(name)
+      if ((await stat(directory)).isDirectory()) return directory
+    } catch {
+      // 该候选目录不可用，继续尝试下一个。
+    }
+  }
+  return process.cwd()
 }
 
 async function launchHarness() {
@@ -330,7 +366,7 @@ async function launchHarness() {
 
   const port = await getAvailablePort()
   const url = `http://127.0.0.1:${port}`
-  const workspacePath = app.isPackaged ? app.getPath('documents') : process.cwd()
+  const workspacePath = await resolveWorkspacePath()
   const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [
     dshInstallation.binDir,
   ])
@@ -472,6 +508,7 @@ function showMessageBox(options) {
 }
 
 function desktopUpdateMenuLabel() {
+  if (IS_PORTABLE_BUILD) return `便携版 v${app.getVersion()}（手动更新）`
   const version = desktopUpdateState.update?.manifest.version
   switch (desktopUpdateState.status) {
     case 'checking':
@@ -598,6 +635,17 @@ async function checkForDesktopUpdate({ manual = false } = {}) {
         type: 'info',
         title: '桌面端更新',
         message: '开发模式不会检查桌面端更新。',
+      })
+    }
+    return
+  }
+  if (IS_PORTABLE_BUILD) {
+    if (manual) {
+      await showMessageBox({
+        type: 'info',
+        title: '桌面端更新',
+        message: `当前是便携版 v${app.getVersion()}。`,
+        detail: '便携版不会自动安装新版本，请从发布页下载新的便携版文件后替换。',
       })
     }
     return
@@ -829,6 +877,11 @@ if (!singleInstance) {
   })
 
   app.whenReady().then(() => {
+    if (process.platform === 'win32') {
+      // 让任务栏分组、跳转列表和系统通知使用应用自身身份，而不是 Electron
+      // 默认身份；该值必须与 package.json 的 build.appId 保持一致。
+      app.setAppUserModelId('com.atlankj.deepseekharnessdesktop')
+    }
     const applicationMenu =
       process.platform === 'darwin'
         ? Menu.buildFromTemplate(createApplicationMenuTemplate())
