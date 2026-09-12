@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, readdir, rename, rm, stat } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +38,7 @@ import {
   writeDshUpdateCache,
 } from './dsh-runtime.mjs'
 import { resolveNodeEnvironment } from './node-runtime.mjs'
+import { createHarnessConsoleLaunch, findLinuxTerminal } from './harness-console.mjs'
 import {
   isAllowedNavigationUrl,
   isAllowedRendererPermission,
@@ -71,6 +72,8 @@ let desktopUpdateTimeout = null
 let desktopUpdateInterval = null
 let desktopUpdateState = { status: 'idle', progress: null, update: null, file: null }
 let desktopUpdatePrompt = null
+// 上次成功启动 Harness 时解析出的环境，供托盘里的「打开 Harness 命令行」复用。
+let harnessConsoleContext = null
 
 function emitStatus(message, detail = '', progress = null, error = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -381,6 +384,7 @@ async function launchHarness() {
   const port = await getAvailablePort()
   const url = `http://127.0.0.1:${port}`
   const workspacePath = await resolveWorkspacePath()
+  harnessConsoleContext = { nodeEnvironment, dshInstallation, workspacePath }
   const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [
     dshInstallation.binDir,
   ])
@@ -798,6 +802,59 @@ function updateTrayTheme() {
   if (tray) tray.setImage(createTrayImage())
 }
 
+// 应用只在启动 Harness 时把私有 Node.js 与全局 dsh 目录注入子进程 PATH，
+// 用户自己的终端拿不到，因此在没装 Node.js 的机器（尤其是 Windows）上无法
+// 执行 `dsh plugin` 这类全局命令。这里开一个已注入 PATH 的终端窗口，
+// 不修改系统 PATH。
+async function openHarnessConsole() {
+  const context = harnessConsoleContext
+  if (!context) return
+  try {
+    const launch = createHarnessConsoleLaunch({
+      nodeEnvironment: context.nodeEnvironment,
+      dshInstallation: context.dshInstallation,
+      workspacePath: context.workspacePath,
+      userDataPath: app.getPath('userData'),
+      linuxTerminal: process.platform === 'linux' ? await findLinuxTerminal() : null,
+    })
+    if (launch.script) {
+      await mkdir(path.dirname(launch.script.path), { recursive: true })
+      await writeFile(launch.script.path, launch.script.content, { mode: launch.script.mode })
+      await chmod(launch.script.path, launch.script.mode)
+    }
+    if (!launch.command) {
+      shell.showItemInFolder(launch.script.path)
+      await showMessageBox({
+        type: 'info',
+        title: '未找到可用的终端',
+        message: '已为你生成 Harness 命令行脚本，请手动运行。',
+        detail: launch.script.path,
+      })
+      return
+    }
+    const child = spawn(launch.command, launch.args, launch.options)
+    child.on('error', (error) => {
+      console.warn('[console] unable to open harness console', error)
+      void showMessageBox({
+        type: 'error',
+        title: '无法打开 Harness 命令行',
+        message: '启动终端失败。',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    })
+    // 终端独立于应用生命周期，关闭应用后仍可继续使用。
+    child.unref()
+  } catch (error) {
+    console.warn('[console] unable to prepare harness console', error)
+    await showMessageBox({
+      type: 'error',
+      title: '无法打开 Harness 命令行',
+      message: '准备命令行环境失败。',
+      detail: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
 function createTrayContextMenu() {
   const updateBusy = ['checking', 'downloading', 'installing'].includes(desktopUpdateState.status)
   return Menu.buildFromTemplate([
@@ -810,6 +867,14 @@ function createTrayContextMenu() {
         if (harnessOrigin) {
           void shell.openExternal(harnessLaunchUrl ?? `${harnessOrigin}/`)
         }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '打开 Harness 命令行（安装插件）',
+      enabled: Boolean(harnessConsoleContext),
+      click: () => {
+        void openHarnessConsole()
       },
     },
     { type: 'separator' },

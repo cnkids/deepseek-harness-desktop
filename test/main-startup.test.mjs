@@ -22,3 +22,17 @@ test('main process registers the single instance guard before ready', async () =
   assert.match(source, /app\.requestSingleInstanceLock\(\)/)
   assert.match(source, /app\.quit\(\)/)
 })
+
+// 回归守卫：托盘里的「打开 Harness 命令行」必须复用启动时解析出的环境，
+// 否则在没有系统 Node.js 的机器上用户仍然无法执行 dsh 全局命令。
+test('tray exposes the Harness console backed by the resolved launch context', async () => {
+  const source = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
+
+  assert.match(
+    source,
+    /harnessConsoleContext = \{ nodeEnvironment, dshInstallation, workspacePath \}/,
+  )
+  assert.match(source, /label: '打开 Harness 命令行（安装插件）'/)
+  assert.match(source, /enabled: Boolean\(harnessConsoleContext\)/)
+  assert.match(source, /createHarnessConsoleLaunch\(/)
+})
