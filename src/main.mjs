@@ -25,6 +25,7 @@ import {
   createApplicationMenuTemplate,
   createWebContextMenuTemplate,
 } from './edit-menu.mjs'
+import { summarizeHarnessFailure } from './harness-diagnostics.mjs'
 import {
   buildHarnessEnvironment,
   DSH_PACKAGE_NAME,
@@ -51,6 +52,8 @@ const DSH_UPDATE_RETRY_INTERVAL_MS = 5 * 60_000
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
 const DESKTOP_UPDATE_READY_MAX_AGE_MS = 48 * 60 * 60_000
 const LOADING_HTML_PATH = path.join(__dirname, 'loading.html')
+// 启动失败时用于回溯原因的 dsh 输出行数上限。
+const HARNESS_OUTPUT_LIMIT = 200
 // electron-builder 的便携版会把可执行文件所在目录写入该变量。便携版不能像
 // 安装版那样用 NSIS 安装包覆盖自己，因此只提示手动下载新版本。
 const IS_PORTABLE_BUILD =
@@ -391,7 +394,15 @@ async function launchHarness() {
   dshProcess = child
   let harnessReady = false
   let authenticatedUrl = null
+  // 保留最近的子进程输出：启动失败时要把 dsh 真正报的错带到启动页，
+  // 否则用户只能看到“进程意外退出（代码 1）”。
+  const harnessOutput = []
+  const recordHarnessLine = (line) => {
+    harnessOutput.push(line)
+    if (harnessOutput.length > HARNESS_OUTPUT_LIMIT) harnessOutput.shift()
+  }
   appendProcessOutput(child.stdout, 'log', (line) => {
+    recordHarnessLine(line)
     // dsh web protects its UI with a per-process launch token printed on
     // stdout ("dsh web: http://127.0.0.1:PORT/?token=..."); the first request
     // carrying the token exchanges it for a signed session cookie.
@@ -403,7 +414,7 @@ async function launchHarness() {
       }
     }
   })
-  appendProcessOutput(child.stderr, 'error')
+  appendProcessOutput(child.stderr, 'error', recordHarnessLine)
   child.once('error', (error) => {
     console.error('[dsh] process error', error)
   })
@@ -416,7 +427,15 @@ async function launchHarness() {
     mainWindow
       .loadFile(LOADING_HTML_PATH)
       .then(() => {
-        emitStatus('Harness 已停止', `后台进程意外退出（${exitReason}）。`, null, true)
+        const summary = summarizeHarnessFailure(harnessOutput)
+        emitStatus(
+          'Harness 已停止',
+          summary
+            ? `后台进程意外退出（${exitReason}）。\n${summary}`
+            : `后台进程意外退出（${exitReason}）。`,
+          null,
+          true,
+        )
       })
       .catch((error) => {
         console.warn('[dsh] unable to restore the loading page', error)
@@ -428,7 +447,14 @@ async function launchHarness() {
     `启动版本 ${dshInstallation.version} · ${url}`,
     null,
   )
-  const readyUrl = await waitForHarness(url, child, () => authenticatedUrl)
+  let readyUrl
+  try {
+    readyUrl = await waitForHarness(url, child, () => authenticatedUrl)
+  } catch (error) {
+    // 附上 dsh 自己报的错，插件缺失、端口占用这类问题才可自助排查。
+    const summary = summarizeHarnessFailure(harnessOutput)
+    throw summary ? new Error(`${error.message}\n${summary}`) : error
+  }
   harnessReady = true
   harnessOrigin = new URL(url).origin
   emitStatus('Harness 已启动', url, 100)
