@@ -1,10 +1,10 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Electron desktop launcher for DeepSeek Harness with managed Node.js fallback",
   "author": {
-    "name": "atlantis-mk and DeepSeek Harness Desktop contributors",
-    "email": "atlanxg@gmail.com"
+    "name": "cnkids and DeepSeek Harness Desktop contributors",
+    "email": "rclandy7@gmail.com"
   },
   "license": "MIT",
   "homepage": "https://github.com/cnkids/deepseek-harness-desktop#readme",
@@ -38,7 +38,7 @@
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.atlankj.deepseekharnessdesktop",
+    "appId": "com.cnkids.deepseekharnessdesktop",
     "productName": "DeepSeek Harness Desktop",
     "artifactName": "DeepSeek-Harness-Desktop-${version}-${os}-${arch}.${ext}",
     "asar": true,

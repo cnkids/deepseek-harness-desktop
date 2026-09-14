@@ -99,6 +99,41 @@ test('reuses an already installed managed runtime without system discovery', asy
   }
 })
 
+test('prefers a compatible system Node over an installed managed runtime', async () => {
+  if (process.platform === 'win32') return
+
+  const current = await inspectNodeInstallation(process.execPath, process.platform)
+  assert.ok(current)
+  const root = await mkdtemp(path.join(os.tmpdir(), 'managed-node-order-'))
+  const runtimeDir = path.join(
+    root,
+    `node-v${MANAGED_NODE_VERSION}-${process.platform}-${process.arch}`,
+  )
+  try {
+    await mkdir(path.join(runtimeDir, 'bin'), { recursive: true })
+    await mkdir(path.join(runtimeDir, 'lib', 'node_modules', 'npm', 'bin'), {
+      recursive: true,
+    })
+    await symlink(process.execPath, path.join(runtimeDir, 'bin', 'node'))
+    await symlink(
+      current.npxCliPath,
+      path.join(runtimeDir, 'lib', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
+    )
+
+    const installation = await resolveNodeEnvironment({
+      runtimeRoot: root,
+      platform: process.platform,
+      arch: process.arch,
+    })
+    // 即便私有 runtime 可用，有兼容的系统 Node.js 时也要用它：dsh 才会装进
+    // 用户自己的全局 npm 环境，用户才能在自己的终端里执行 dsh 命令。
+    assert.ok(installation)
+    assert.equal(installation.source, 'system')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('keeps an explicit Node override ahead of a cached managed runtime', async () => {
   if (process.platform === 'win32') return
 

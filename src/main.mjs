@@ -38,6 +38,7 @@ import {
   writeDshUpdateCache,
 } from './dsh-runtime.mjs'
 import { resolveNodeEnvironment } from './node-runtime.mjs'
+import { applyUserPathFix, hasPathEntry } from './dsh-path.mjs'
 import {
   isAllowedNavigationUrl,
   isAllowedRendererPermission,
@@ -71,6 +72,9 @@ let desktopUpdateTimeout = null
 let desktopUpdateInterval = null
 let desktopUpdateState = { status: 'idle', progress: null, update: null, file: null }
 let desktopUpdatePrompt = null
+// dsh 装好了但目录不在用户 PATH 上时记在这里，用于托盘的修复入口与一次性提示。
+let dshPathFix = null
+let dshPathPrompted = false
 
 function emitStatus(message, detail = '', progress = null, error = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -381,6 +385,7 @@ async function launchHarness() {
   const port = await getAvailablePort()
   const url = `http://127.0.0.1:${port}`
   const workspacePath = await resolveWorkspacePath()
+  dshPathFix = detectDshPathFix(nodeEnvironment, dshInstallation)
   const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [
     dshInstallation.binDir,
   ])
@@ -470,6 +475,7 @@ async function launchHarness() {
   harnessOrigin = new URL(url).origin
   emitStatus('Harness 已启动', url, 100)
   await mainWindow.loadURL(readyUrl)
+  promptDshPathFix()
 }
 
 async function startApplication() {
@@ -801,6 +807,60 @@ function updateTrayTheme() {
 // 应用只在启动 Harness 时把私有 Node.js 与全局 dsh 目录注入子进程 PATH，
 // 用户自己的终端拿不到。这一点现在通过文档说明：想让 dsh 在自己的终端里
 // 可用，请安装一份兼容的 Node.js（见 README「在自己的终端里使用 dsh」）。
+// 只有用系统 Node.js 时才谈得上 PATH 修复：私有 runtime 目录里同时含 node 与
+// npm，把它加进用户 PATH 等于顺手给用户装一套 Node.js，代价不可接受。
+function detectDshPathFix(nodeEnvironment, dshInstallation) {
+  if (nodeEnvironment.source !== 'system' || !dshInstallation.binDir) return null
+  if (hasPathEntry(process.env.PATH, dshInstallation.binDir)) return null
+  return { binDir: dshInstallation.binDir }
+}
+
+async function applyDshPathFix() {
+  const fix = dshPathFix
+  if (!fix) return
+  try {
+    const result = await applyUserPathFix({ binDir: fix.binDir })
+    dshPathFix = null
+    await showMessageBox({
+      type: 'info',
+      title: 'dsh 命令已加入 PATH',
+      message: '请重新打开一个终端，再执行 dsh 命令。',
+      detail:
+        result.kind === 'shell-rc'
+          ? `已写入 ${result.detail}，新开的终端即可使用 dsh。`
+          : '已写入当前用户的 PATH，新开的终端即可使用 dsh。',
+    })
+  } catch (error) {
+    console.warn('[dsh-path] unable to update PATH', error)
+    await showMessageBox({
+      type: 'error',
+      title: '加入 PATH 失败',
+      message: '无法自动写入 PATH，请按 README 手动添加。',
+      detail: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+function promptDshPathFix() {
+  if (!dshPathFix || dshPathPrompted) return
+  dshPathPrompted = true
+  void showMessageBox({
+    type: 'info',
+    title: 'dsh 命令还不能在终端里使用',
+    message: 'dsh 已经装好，但它的目录不在你的 PATH 上。',
+    detail: `${dshPathFix.binDir}\n\n加入后即可在自己的终端里执行 dsh plugin --profile web add ...。也可以稍后从托盘菜单选择「修复 dsh 命令（加入 PATH）」。`,
+    buttons: ['立即修复', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  })
+    .then(({ response }) => {
+      if (response === 0) void applyDshPathFix()
+    })
+    .catch((error) => {
+      console.warn('[dsh-path] unable to ask about PATH', error)
+    })
+}
+
 function createTrayContextMenu() {
   const updateBusy = ['checking', 'downloading', 'installing'].includes(desktopUpdateState.status)
   return Menu.buildFromTemplate([
@@ -816,6 +876,17 @@ function createTrayContextMenu() {
       },
     },
     { type: 'separator' },
+    ...(dshPathFix
+      ? [
+          {
+            label: '修复 dsh 命令（加入 PATH）',
+            click: () => {
+              void applyDshPathFix()
+            },
+          },
+          { type: 'separator' },
+        ]
+      : []),
     {
       label: desktopUpdateMenuLabel(),
       enabled: !updateBusy,
@@ -918,7 +989,7 @@ if (singleInstance) {
   if (process.platform === 'win32') {
     // 让任务栏分组、跳转列表和系统通知使用应用自身身份，而不是 Electron
     // 默认身份；该值必须与 package.json 的 build.appId 保持一致。
-    app.setAppUserModelId('com.atlankj.deepseekharnessdesktop')
+    app.setAppUserModelId('com.cnkids.deepseekharnessdesktop')
   }
 
   // Electron 只有在入口模块求值完成后才发出 ready 事件，所以顶层写

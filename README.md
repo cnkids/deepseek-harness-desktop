@@ -16,26 +16,16 @@
 </p>
 
 <p align="center">
-  <a href="https://blog.atlankj.com/products/deepseek-harness-desktop"><strong>产品介绍与下载</strong></a>
-  ·
   <a href="https://github.com/cnkids/deepseek-harness-desktop/releases/latest">GitHub Releases</a>
-  ·
-  <a href="https://blog.atlankj.com/products/deepseek-harness-desktop/ai.md">AI 安装文档</a>
-</p>
-
-<p align="center">
-  <a href="https://blog.atlankj.com/products/deepseek-harness-desktop">
-    <img src="https://blog.atlankj.com/api/media/file/deepseek-harness-desktop-hero-1-1200x630.jpg" alt="DeepSeek Harness Desktop 界面预览" width="100%">
-  </a>
 </p>
 
 DeepSeek Harness Desktop 是面向 macOS、Windows 和 Linux 的非官方桌面启动器。它将 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的本地 Web UI 带入原生桌面窗口，自动管理运行环境、本地服务和系统托盘。
 
-这个仓库专注于轻量、可靠的启动体验：不修改 Harness 上游源码，不请求管理员权限，不改写系统 `PATH`，也不替换电脑上已有的 Node.js。
+这个仓库专注于轻量、可靠的启动体验：不修改 Harness 上游源码，不请求管理员权限，不替换电脑上已有的 Node.js。系统 `PATH` 也不会被悄悄改动——只有你点击「修复 dsh 命令（加入 PATH）」时，才会把 `dsh` 所在目录写进**当前用户**的 `PATH`。
 
 ## 下载与安装
 
-推荐前往[产品介绍页](https://blog.atlankj.com/products/deepseek-harness-desktop)自动识别系统并下载，也可以从 [GitHub Releases](https://github.com/cnkids/deepseek-harness-desktop/releases/latest) 获取安装包和 `SHA256SUMS.txt`。
+从 [GitHub Releases](https://github.com/cnkids/deepseek-harness-desktop/releases/latest) 获取安装包和 `SHA256SUMS.txt`。
 
 | 平台 | 系统要求 | 安装包 |
 | --- | --- | --- |
@@ -82,7 +72,7 @@ xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"
 1. 打开 DeepSeek Harness Desktop。
 2. 首次启动时，应用检查本机是否存在兼容的 Node.js 与全局安装的 `dsh`。
 3. 如果没有，应用下载并校验一份仅供自身使用的私有 Node.js runtime。
-4. 使用系统 Node.js 时，应用在用户的 npm 全局环境安装或更新 `@deepseek-ai/dsh`；使用私有 Node.js 时，Harness 同步安装或更新到私有 runtime。
+4. 使用系统 Node.js 时，应用在用户的 npm 全局环境安装或更新 `@deepseek-ai/dsh`；只有本机没有兼容的 Node.js 时，应用才下载私有 runtime 并把 Harness 装到那里。
 5. 健康检查通过后，桌面窗口自动进入 Harness，并保存已验证的启动环境快照。
 
 首次启动需要联网访问 Node.js、npm 与 DeepSeek Harness 相关服务，耗时取决于网络状况。后续启动直接复用上次已验证的 Node.js 与 Harness 路径，仅在缓存失效时重新检测环境；Harness 更新检查结果会短期缓存，避免频繁联网阻塞启动。启动失败时可以在启动页直接重试。
@@ -101,8 +91,9 @@ xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness Desktop.app"
 如需指向企业内网或代理，可用环境变量指定（会排在官方源之前优先尝试）：
 
 ```sh
-DSH_DESKTOP_NODE_MIRROR=https://mirror.example.com/node/v24.12.0 \
-DSH_DESKTOP_NPM_REGISTRY=https://registry.example.com \
+# 把尖括号里的地址换成你自己的内网地址
+DSH_DESKTOP_NODE_MIRROR=https://<内网镜像域名>/node/v24.12.0 \
+DSH_DESKTOP_NPM_REGISTRY=https://<内网 registry 域名> \
 npm start
 ```
 
@@ -113,7 +104,7 @@ npm start
 | 功能 | 说明 |
 | --- | --- |
 | 一键启动 | 自动运行 `@deepseek-ai/dsh web`，无需手动使用终端 |
-| 环境自适应 | 优先使用兼容的系统 Node.js，否则安装应用私有 runtime |
+| 环境自适应 | 优先使用兼容的系统 Node.js，`dsh` 因此装进你自己的全局 npm 环境；没有兼容的才安装应用私有 runtime |
 | 网络自适应 | 初始化默认走官方源，探测不通时自动回退国内镜像，也可用环境变量指定私有源 |
 | 安全校验 | 下载的 Node.js 官方归档通过固定 SHA-256 校验后才会安装 |
 | 自动同步 | 启动时查询 npm registry（官方源优先，不可达时自动改用国内镜像），并在用户全局环境或应用私有环境中原位更新 DSH |
@@ -146,14 +137,37 @@ npm start
 
 托管 runtime 位于 Electron 的 `userData` 目录。桌面端不会覆盖 `DSH_HOME`：默认与命令行共用 `~/.dsh`，因此通过 `dsh plugin --profile web add ...` 安装的插件会在桌面端下次启动时生效（安装后需要重启应用）；如果启动环境显式设置了 `DSH_HOME`，桌面端会原样继承。
 
-本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。桌面端不再代开终端，这种情况按下一节自行安装一份兼容的 Node.js，让 `dsh` 进入你自己的 npm 全局环境即可。
+本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。这种情况按下一节自行安装一份兼容的 Node.js，应用就会把 `dsh` 装进你的全局 npm 环境。
 
 ### 在自己的终端里使用 dsh
 
-如果你希望**在自己的终端里直接**敲 `dsh plugin --profile web add ...`，可以自行安装一份 Node.js：应用会改用系统 Node.js，并把 `@deepseek-ai/dsh` 装进你自己的 npm 全局环境。有两个前提必须注意，否则装了也不生效：
+应用**优先使用兼容的系统 Node.js**，并把 `@deepseek-ai/dsh` 装进你自己的 npm 全局环境（Windows 通常是 `%APPDATA%\npm`，POSIX 是 npm 全局前缀下的 `bin`）。本机有兼容的 Node.js 时，`dsh` 就应该能直接在终端里使用。
 
-1. **版本要落在兼容范围内**：`^22.19.0 || >=24.0.0`，也就是 22.19.0 及以上的 22.x，或 24.x 及以上。20.x 与 23.x 都不被接受——应用会判定本机没有兼容的 Node.js，转而继续使用私有 runtime。建议直接装 24.x LTS。
-2. **应用优先复用已经存在的私有 runtime**：一旦应用下载过私有 runtime（`userData/runtime`），只安装 Node.js 并不会改变它的选择。必须先删掉该目录，应用才会重新探测系统 Node.js。
+如果终端里仍提示找不到 `dsh`，通常是下面两种情况之一。
+
+**一、Node.js 版本不在兼容范围内**
+
+范围是 `^22.19.0 || >=24.0.0`，即 22.19.0 及以上的 22.x，或 24.x 及以上。20.x 与 23.x 都不被接受——应用会判定本机没有兼容的 Node.js，转而下载并使用私有 runtime，`dsh` 自然不在你的 `PATH` 上。建议装 24.x LTS。
+
+**二、npm 全局目录不在 `PATH` 上**
+
+dsh 装好了，但那个目录不在 `PATH` 上。应用检测到这种情况时（仅限使用系统 Node.js 时）会：
+
+- 在启动完成后弹一次提示，提供「立即修复」，一键把该目录写进**当前用户**的 `PATH`：Windows 走 `HKCU\Environment` 并用 .NET API 广播（不用会把 `PATH` 截断到 1024 字符的 `setx`）；macOS/Linux 在登录 shell 的 rc 文件里写入一段带标记的 `export PATH`，可重复执行不会重复追加
+- 同时在托盘菜单提供一个常驻入口「修复 dsh 命令（加入 PATH）」
+- 修复只影响**新开的**终端，已经打开的终端需要重开
+
+也可以手动处理，Windows 上：
+
+```powershell
+# 先确认目录里确实有 dsh.cmd
+Get-ChildItem "$env:APPDATA\npm" -Filter 'dsh*' | Select-Object -ExpandProperty Name
+# 再把它加入当前用户的 PATH
+[Environment]::SetEnvironmentVariable('Path',
+  ([Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + ';' + "$env:APPDATA\npm"), 'User')
+```
+
+如果本机 Node.js 版本兼容、应用却仍在用私有 runtime，删掉 `userData/runtime` 后重启应用即可让它重新探测（Windows 上该目录里的 npm 依赖树会超出 `MAX_PATH`，删不掉时见下一段）。
 
 以 Windows 为例：
 
@@ -256,6 +270,14 @@ npm run release -- 0.3.0
 
 ## 版本记录
 
+### 0.2.6
+
+- 修复「本机已经装了 Node.js，却依然拿不到 `dsh` 命令」：`resolveNodeEnvironment` 此前只要发现私有 runtime 就无条件复用它，于是先装好 Node.js 的机器仍然把 `dsh` 装进应用私有目录，用户终端里永远看不到。现在改为**优先使用兼容的系统 Node.js**，与 README 一直承诺的「环境自适应」一致；私有 runtime 只在没有兼容系统 Node.js 时兜底。
+- 新增 PATH 检测与一键修复：使用系统 Node.js 且 npm 全局目录不在 `PATH` 上时，启动完成后弹一次提示，并可从该提示或托盘菜单「修复 dsh 命令（加入 PATH）」把目录写入当前用户 PATH。Windows 走 `HKCU\Environment` 并用 .NET API 广播（不用会截断 `PATH` 的 `setx`）；macOS/Linux 写入登录 shell rc 的标记块，重复执行不会重复追加。修复只影响新开的终端。
+- 该修复只在系统 Node.js 场景下提供：私有 runtime 目录里同时含 `node` 与 `npm`，把它加进用户 PATH 等于顺手给用户装一套 Node.js，代价不可接受。
+- 品牌与链接清理：README 移除指向原始作者站点的产品页、AI 安装文档与预览图，以及另一个社区桌面端项目的外链；无法访问的示例占位链接改为纯占位文本。`package.json` 的 `author.name` 与 `build.appId`、`src/main.mjs` 的 `setAppUserModelId`、`LICENSE` 版权署名统一为 `cnkids`。
+  注意：`appId` 由 `com.atlankj.deepseekharnessdesktop` 改为 `com.cnkids.deepseekharnessdesktop`，应用身份随之变化——Windows 上旧的卸载记录不会被新安装包接管（会多出一条），macOS 的 bundle id 也变了；用户数据目录不受影响（它取自 `name`）。
+
 ### 0.2.5
 
 - 移除托盘菜单里的「打开 Harness 命令行（安装插件）」入口及其实现（`src/harness-console.mjs`、对应单元测试与主进程接线）：不再由应用代开终端，`dsh` 命令改为在用户自行安装 Node.js 后于自己的终端里使用。
@@ -312,8 +334,7 @@ npm run release -- 0.3.0
 ## 项目关系
 
 - [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)：提供核心 Agent、插件系统和 Web UI；本项目通过公开的 npm 包运行它。
-- [anywhere-labs/deepseek-harness-desktop](https://github.com/anywhere-labs/deepseek-harness-desktop)：功能更完整的社区桌面端，也是本 README 信息结构与呈现方式的参考项目。
-- 本仓库是独立实现的轻量启动器，与上述项目不存在隶属或背书关系。
+- 本仓库是独立实现的轻量启动器，与 DeepSeek Harness 项目不存在隶属或背书关系。
 
 ## 安全与许可证
 

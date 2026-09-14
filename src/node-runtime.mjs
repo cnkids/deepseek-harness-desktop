@@ -487,14 +487,16 @@ export async function ensureManagedNode({
 }
 
 export async function resolveNodeEnvironment(options) {
-  // Once the app has provisioned a private runtime, prefer that known-good path.
-  // This avoids spawning a login shell on every subsequent application launch.
-  if (!process.env.DSH_DESKTOP_NODE) {
-    const managed = await findInstalledManagedNode(options)
-    if (managed) return managed
-  }
-
+  // 优先使用兼容的系统 Node.js（这也是 README「环境自适应」承诺的行为）：dsh
+  // 会因此装进用户自己的全局 npm 环境，用户在自己的终端里就能直接执行 dsh。
+  // 私有 runtime 只是没有兼容系统 Node 时的兜底；此前它被无条件优先复用，导致
+  // 先装了 Node.js 的机器依然拿不到 dsh 命令。
+  // 冷启动才会走到这里：有启动缓存时 launchHarness 直接复用上次结果。
   const system = await findCompatibleSystemNode(options)
   if (system) return system
+
+  const managed = await findInstalledManagedNode(options)
+  if (managed) return managed
+
   return ensureManagedNode(options)
 }
