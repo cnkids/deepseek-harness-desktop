@@ -121,11 +121,13 @@ export function resolveShellRcPath({ home, shellPath, exists = () => false }) {
   const shellName = path.basename(String(shellPath ?? ''))
   const preferred = SHELL_RC_FILES[shellName] ?? null
   for (const candidate of [preferred, '.zshrc', '.bashrc', '.profile'].filter(Boolean)) {
-    const full = path.join(home, candidate)
+    // 这里只处理 POSIX 路径（Windows 走注册表分支），用 path.posix 保证结果
+    // 与宿主平台无关：在 Windows 上开发/测试时也不会拼出反斜杠路径。
+    const full = path.posix.join(home, candidate)
     if (exists(full)) return full
   }
   // 一个都不存在时落到用户 shell 对应的文件，而不是随便造一个别的 shell 不读的。
-  return path.join(home, preferred ?? '.profile')
+  return path.posix.join(home, preferred ?? '.profile')
 }
 
 export async function applyUserPathFix({

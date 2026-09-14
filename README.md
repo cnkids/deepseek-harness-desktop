@@ -256,6 +256,8 @@ DSH_DESKTOP_NODE=/absolute/path/to/node npm start
 | `npm run pack` | 生成未封装的应用目录 |
 | `npm run dist` | 构建当前平台的安装包 |
 
+CI 会在 macOS、Windows、Linux 三个平台各跑一遍 `npm test`，因此**单元测试不能依赖宿主平台**：涉及平台的断言必须显式传入 `platform`，路径拼接要用 `path.posix` / `path.win32` 指定，不要用会随宿主变化的 `path.join`、`path.sep`。否则会出现"本地全绿、Windows 作业红"的情况。
+
 ## 发布
 
 维护者在干净且已同步的 `main` 分支运行：

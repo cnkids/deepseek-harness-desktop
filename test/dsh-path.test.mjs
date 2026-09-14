@@ -11,25 +11,29 @@ import {
 } from '../src/dsh-path.mjs'
 
 test('detects PATH entries per platform semantics', () => {
-  assert.equal(hasPathEntry('C:\\Windows;C:\\Users\\me\\AppData\\Roaming\\npm', 'c:\\users\\me\\appdata\\roaming\\npm', { platform: 'win32' }), true)
-  assert.equal(hasPathEntry('C:\\Windows\\', 'C:\\Windows', { platform: 'win32' }), true)
-  assert.equal(hasPathEntry('C:\\Windows', 'C:\\npm', { platform: 'win32' }), false)
+  const win = { platform: 'win32' }
+  const posix = { platform: 'linux' }
 
-  assert.equal(hasPathEntry('/usr/bin:/bin', '/usr/bin'), true)
-  assert.equal(hasPathEntry('/usr/bin/', '/usr/bin'), true)
-  assert.equal(hasPathEntry('/usr/bin:/bin', '/USR/BIN'), false)
-  assert.equal(hasPathEntry('', '/usr/bin'), false)
-  assert.equal(hasPathEntry('/usr/bin', ''), false)
-  assert.equal(hasPathEntry(undefined, '/usr/bin'), false)
+  assert.equal(hasPathEntry('C:\\Windows;C:\\Users\\me\\AppData\\Roaming\\npm', 'c:\\users\\me\\appdata\\roaming\\npm', win), true)
+  assert.equal(hasPathEntry('C:\\Windows\\', 'C:\\Windows', win), true)
+  assert.equal(hasPathEntry('C:\\Windows', 'C:\\npm', win), false)
+
+  assert.equal(hasPathEntry('/usr/bin:/bin', '/usr/bin', posix), true)
+  assert.equal(hasPathEntry('/usr/bin/', '/usr/bin', posix), true)
+  assert.equal(hasPathEntry('/usr/bin:/bin', '/USR/BIN', posix), false)
+  assert.equal(hasPathEntry('', '/usr/bin', posix), false)
+  assert.equal(hasPathEntry('/usr/bin', '', posix), false)
+  assert.equal(hasPathEntry(undefined, '/usr/bin', posix), false)
 })
 
 test('appends a PATH entry idempotently', () => {
   assert.equal(appendPathEntry('C:\\Windows', 'C:\\npm', 'win32'), 'C:\\Windows;C:\\npm')
   assert.equal(appendPathEntry('C:\\Windows;C:\\npm', 'c:\\NPM', 'win32'), 'C:\\Windows;C:\\npm')
   assert.equal(appendPathEntry(';C:\\Windows;;', 'C:\\npm', 'win32'), 'C:\\Windows;C:\\npm')
-  assert.equal(appendPathEntry(':/usr/bin::', '/opt/dsh/bin'), '/usr/bin:/opt/dsh/bin')
-  assert.equal(appendPathEntry('/usr/bin', '/opt/dsh/bin'), '/usr/bin:/opt/dsh/bin')
-  assert.equal(appendPathEntry('/opt/dsh/bin:/usr/bin', '/opt/dsh/bin'), '/opt/dsh/bin:/usr/bin')
+
+  assert.equal(appendPathEntry(':/usr/bin::', '/opt/dsh/bin', 'linux'), '/usr/bin:/opt/dsh/bin')
+  assert.equal(appendPathEntry('/usr/bin', '/opt/dsh/bin', 'linux'), '/usr/bin:/opt/dsh/bin')
+  assert.equal(appendPathEntry('/opt/dsh/bin:/usr/bin', '/opt/dsh/bin', 'linux'), '/opt/dsh/bin:/usr/bin')
 })
 
 test('writes a marked block into a shell rc file without duplicating it', () => {
