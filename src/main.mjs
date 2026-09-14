@@ -38,7 +38,13 @@ import {
   writeDshUpdateCache,
 } from './dsh-runtime.mjs'
 import { findCompatibleSystemNode, resolveNodeEnvironment } from './node-runtime.mjs'
-import { applyUserPathFix, hasPathEntry } from './dsh-path.mjs'
+import {
+  applyUserPathFix,
+  hasPathEntry,
+  isPathFixApplied,
+  readPathFixState,
+  writePathFixState,
+} from './dsh-path.mjs'
 import {
   isAllowedNavigationUrl,
   isAllowedRendererPermission,
@@ -73,8 +79,16 @@ let desktopUpdateInterval = null
 let desktopUpdateState = { status: 'idle', progress: null, update: null, file: null }
 let desktopUpdatePrompt = null
 // dsh 装好了但目录不在用户 PATH 上时记在这里，用于托盘的修复入口与一次性提示。
-let dshPathFix = null
+// 用系统 Node.js 时记录 dsh 的位置与 PATH 状态，供托盘常驻行与一次性提示使用。
+// undefined 表示还没启动完成（此时托盘不显示该行）。
+let dshCommandState
+// 从 userData/cache/dsh-path.json 读入：记过提示与成功修复过的目录。
+let dshPathState = { promptedFor: null, appliedFor: null }
 let dshPathPrompted = false
+
+function dshPathStatePath() {
+  return path.join(app.getPath('userData'), 'cache', 'dsh-path.json')
+}
 
 function emitStatus(message, detail = '', progress = null, error = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -403,7 +417,16 @@ async function launchHarness() {
   const port = await getAvailablePort()
   const url = `http://127.0.0.1:${port}`
   const workspacePath = await resolveWorkspacePath()
-  dshPathFix = detectDshPathFix(nodeEnvironment, dshInstallation)
+  dshPathState = await readPathFixState(dshPathStatePath())
+  dshCommandState = detectDshCommandState(nodeEnvironment, dshInstallation)
+  if (dshCommandState?.needsPathFix) {
+    // 已经为这个目录写过用户 PATH / shell rc 时不再当作"缺失"：GUI 应用自身的
+    // process.env.PATH 不会因此改变（macOS 上尤其明显），只看 PATH 会反复提示。
+    const applied =
+      dshPathState.appliedFor === dshCommandState.binDir ||
+      (await isPathFixApplied({ binDir: dshCommandState.binDir }))
+    if (applied) dshCommandState.needsPathFix = false
+  }
   const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [
     dshInstallation.binDir,
   ])
@@ -827,18 +850,51 @@ function updateTrayTheme() {
 // 可用，请安装一份兼容的 Node.js（见 README「在自己的终端里使用 dsh」）。
 // 只有用系统 Node.js 时才谈得上 PATH 修复：私有 runtime 目录里同时含 node 与
 // npm，把它加进用户 PATH 等于顺手给用户装一套 Node.js，代价不可接受。
-function detectDshPathFix(nodeEnvironment, dshInstallation) {
+// undefined = 还没启动完成；null = 不适用（用了私有 runtime）；否则给出目录、
+// 版本与是否需要修复。托盘据此常驻一行自述状态，用户不必猜也便于排查。
+function detectDshCommandState(nodeEnvironment, dshInstallation) {
   if (nodeEnvironment.source !== 'system' || !dshInstallation.binDir) return null
-  if (hasPathEntry(process.env.PATH, dshInstallation.binDir)) return null
-  return { binDir: dshInstallation.binDir }
+  return {
+    binDir: dshInstallation.binDir,
+    version: nodeEnvironment.version,
+    needsPathFix: !hasPathEntry(process.env.PATH, dshInstallation.binDir),
+  }
+}
+
+function dshCommandRow() {
+  if (dshCommandState === null) {
+    return { label: 'dsh 命令仅在应用内可用（应用私有 Node.js）', enabled: false }
+  }
+  if (dshCommandState.needsPathFix) {
+    return {
+      label: '修复 dsh 命令（加入 PATH）',
+      enabled: true,
+      click: () => {
+        void applyDshPathFix()
+      },
+    }
+  }
+  return {
+    label: `dsh 命令已可用（用户 Node.js ${dshCommandState.version}）`,
+    enabled: false,
+  }
+}
+
+function dshCommandMenuItems() {
+  if (dshCommandState === undefined) return []
+  return [dshCommandRow(), { type: 'separator' }]
 }
 
 async function applyDshPathFix() {
-  const fix = dshPathFix
-  if (!fix) return
+  const target = dshCommandState
+  if (!target?.needsPathFix) return
   try {
-    const result = await applyUserPathFix({ binDir: fix.binDir })
-    dshPathFix = null
+    const result = await applyUserPathFix({ binDir: target.binDir })
+    target.needsPathFix = false
+    // 记住已为这个目录写过 PATH：shell rc 的改动不会反映到应用自身的环境里，
+    // 不记下来就会每次启动都重复判定"还没修好"。
+    dshPathState = { ...dshPathState, appliedFor: target.binDir }
+    await writePathFixState(dshPathStatePath(), dshPathState)
     await showMessageBox({
       type: 'info',
       title: 'dsh 命令已加入 PATH',
@@ -859,24 +915,29 @@ async function applyDshPathFix() {
   }
 }
 
-function promptDshPathFix() {
-  if (!dshPathFix || dshPathPrompted) return
+// 同一个目录只提示一次：把已提示过的目录落盘，之后改用托盘菜单里的常驻入口，
+// 不再每次启动都弹窗打扰（此前只有进程内的 dshPathPrompted，重启就会再弹）。
+async function promptDshPathFix() {
+  const fix = dshCommandState?.needsPathFix ? dshCommandState : null
+  if (!fix || dshPathPrompted) return
   dshPathPrompted = true
-  void showMessageBox({
-    type: 'info',
-    title: 'dsh 命令还不能在终端里使用',
-    message: 'dsh 已经装好，但它的目录不在你的 PATH 上。',
-    detail: `${dshPathFix.binDir}\n\n加入后即可在自己的终端里执行 dsh plugin --profile web add ...。也可以稍后从托盘菜单选择「修复 dsh 命令（加入 PATH）」。`,
-    buttons: ['立即修复', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-    .then(({ response }) => {
-      if (response === 0) void applyDshPathFix()
+  try {
+    if (dshPathState.promptedFor === fix.binDir) return
+    dshPathState = { ...dshPathState, promptedFor: fix.binDir }
+    await writePathFixState(dshPathStatePath(), dshPathState)
+    const { response } = await showMessageBox({
+      type: 'info',
+      title: 'dsh 命令还不能在终端里使用',
+      message: 'dsh 已经装好，但它的目录不在你的 PATH 上。',
+      detail: `${fix.binDir}\n\n加入后即可在自己的终端里执行 dsh plugin --profile web add ...。这个提示只会出现一次，之后可从托盘菜单选择「修复 dsh 命令（加入 PATH）」。`,
+      buttons: ['立即修复', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
     })
-    .catch((error) => {
-      console.warn('[dsh-path] unable to ask about PATH', error)
-    })
+    if (response === 0) await applyDshPathFix()
+  } catch (error) {
+    console.warn('[dsh-path] unable to ask about PATH', error)
+  }
 }
 
 function createTrayContextMenu() {
@@ -894,17 +955,7 @@ function createTrayContextMenu() {
       },
     },
     { type: 'separator' },
-    ...(dshPathFix
-      ? [
-          {
-            label: '修复 dsh 命令（加入 PATH）',
-            click: () => {
-              void applyDshPathFix()
-            },
-          },
-          { type: 'separator' },
-        ]
-      : []),
+    ...dshCommandMenuItems(),
     {
       label: desktopUpdateMenuLabel(),
       enabled: !updateBusy,

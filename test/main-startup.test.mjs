@@ -32,6 +32,28 @@ test('main process re-checks a managed startup cache against a system Node', asy
   assert.match(source, /findCompatibleSystemNode\(\{[\s\S]*?loginShell: false,/)
 })
 
+// 回归守卫：PATH 提示必须是「每个目录一次」，且已成功修复过的目录不能因为
+// 应用自身 PATH 未变而反复判定"还没修好"（shell rc 改动不会进 GUI 应用环境）。
+test('main process prompts at most once and remembers applied fixes', async () => {
+  const source = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /dshPathState\.promptedFor === fix\.binDir/)
+  assert.match(source, /await writePathFixState\(dshPathStatePath\(\), dshPathState\)/)
+  assert.match(source, /dshPathState\.appliedFor === dshCommandState\.binDir/)
+  assert.match(source, /dshPathState = \{ \.\.\.dshPathState, appliedFor: target\.binDir \}/)
+})
+
+// 回归守卫：托盘常驻一行自述 dsh 状态——此前只在需要修复时才出现，用户反馈
+// "从来没在托盘里看到过"，也无法远程判断应用当前用的是哪种 Node.js。
+test('tray always shows a self-describing dsh command row', async () => {
+  const source = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /\.\.\.dshCommandMenuItems\(\),/)
+  assert.match(source, /修复 dsh 命令（加入 PATH）/)
+  assert.match(source, /dsh 命令已可用（用户 Node\.js \$\{dshCommandState\.version\}）/)
+  assert.match(source, /dsh 命令仅在应用内可用（应用私有 Node\.js）/)
+})
+
 // 回归守卫：托盘不再提供「打开 Harness 命令行」入口——该能力已移除，
 // 无系统 Node.js 的场景改由 README 的安装说明覆盖。
 test('main process no longer ships a console launcher', async () => {

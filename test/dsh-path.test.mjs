@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 import {
   appendPathEntry,
   applyUserPathFix,
   createWindowsPathFixCommand,
   hasPathEntry,
+  isPathFixApplied,
+  readPathFixState,
   resolveShellRcPath,
   upsertShellRcBlock,
   WINDOWS_PATH_FIX_SCRIPT,
+  writePathFixState,
 } from '../src/dsh-path.mjs'
 
 test('detects PATH entries per platform semantics', () => {
@@ -132,4 +138,76 @@ test('applyUserPathFix writes the marked block on POSIX', async () => {
 
 test('applyUserPathFix rejects a missing bin directory', async () => {
   await assert.rejects(applyUserPathFix({ binDir: '' }), /缺少 dsh 安装目录/)
+})
+
+// PATH 提示每个目录只应出现一次；已成功修复过的目录也要记住——shell rc 的改动
+// 不会反映到应用自身的 process.env.PATH，不记下来就会每次启动重复提示。
+test('remembers which directory was prompted and which was fixed', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'dsh-path-state-'))
+  const statePath = path.join(directory, 'cache', 'dsh-path.json')
+  try {
+    assert.deepEqual(await readPathFixState(statePath), {
+      promptedFor: null,
+      appliedFor: null,
+    })
+
+    await writePathFixState(statePath, { promptedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm' })
+    assert.deepEqual(await readPathFixState(statePath), {
+      promptedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm',
+      appliedFor: null,
+    })
+
+    await writePathFixState(statePath, {
+      promptedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm',
+      appliedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm',
+    })
+    assert.deepEqual(await readPathFixState(statePath), {
+      promptedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm',
+      appliedFor: 'C:\\Users\\me\\AppData\\Roaming\\npm',
+    })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+// POSIX 下可以直接看 shell rc 里有没有含该目录的标记块，比只信状态文件更可靠。
+test('detects an existing shell rc block as already applied', async () => {
+  const content = upsertShellRcBlock('export FOO=1\n', '/opt/dsh/bin')
+  const fileSystem = { readFile: async () => content }
+  const base = {
+    platform: 'linux',
+    home: '/home/me',
+    shellPath: '/bin/zsh',
+    exists: () => true,
+    fileSystem,
+  }
+
+  assert.equal(await isPathFixApplied({ ...base, binDir: '/opt/dsh/bin' }), true)
+  // 目录换了（block 里不是这个目录）→ 视为未应用，需要重新修复。
+  assert.equal(await isPathFixApplied({ ...base, binDir: '/other/bin' }), false)
+  // 没有任何标记块。
+  assert.equal(
+    await isPathFixApplied({ ...base, binDir: '/opt/dsh/bin', fileSystem: { readFile: async () => 'export FOO=1\n' } }),
+    false,
+  )
+  // Windows 一律走状态文件，不读 rc。
+  assert.equal(await isPathFixApplied({ binDir: 'C:\\npm', platform: 'win32', fileSystem }), false)
+})
+
+test('ignores malformed or foreign path fix state', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'dsh-path-bad-'))
+  const statePath = path.join(directory, 'dsh-path.json')
+  const empty = { promptedFor: null, appliedFor: null }
+  try {
+    await writeFile(statePath, 'not json')
+    assert.deepEqual(await readPathFixState(statePath), empty)
+
+    await writeFile(statePath, JSON.stringify({ version: 99, promptedFor: '/x', appliedFor: '/x' }))
+    assert.deepEqual(await readPathFixState(statePath), empty)
+
+    await writeFile(statePath, JSON.stringify({ version: 1, promptedFor: 42, appliedFor: '' }))
+    assert.deepEqual(await readPathFixState(statePath), empty)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

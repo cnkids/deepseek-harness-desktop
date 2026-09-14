@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -13,6 +13,36 @@ const execFileAsync = promisify(execFile)
 
 const RC_MARKER_START = '# >>> deepseek-harness-desktop >>>'
 const RC_MARKER_END = '# <<< deepseek-harness-desktop <<<'
+
+// 提示/修复状态：记住为哪个目录提示过、为哪个目录成功写入过 PATH。后者很关键：
+// macOS 等平台把目录写进 shell rc 之后，GUI 应用自身的 process.env.PATH 并不会
+// 因此改变（launchd 给的是系统默认 PATH），只看 PATH 就会每次启动都重复提示。
+const PROMPT_STATE_VERSION = 1
+
+const EMPTY_FIX_STATE = Object.freeze({ promptedFor: null, appliedFor: null })
+
+function asText(value) {
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+export async function readPathFixState(statePath) {
+  try {
+    const parsed = JSON.parse(await readFile(statePath, 'utf8'))
+    if (parsed?.version !== PROMPT_STATE_VERSION) return { ...EMPTY_FIX_STATE }
+    return { promptedFor: asText(parsed.promptedFor), appliedFor: asText(parsed.appliedFor) }
+  } catch {
+    return { ...EMPTY_FIX_STATE }
+  }
+}
+
+export async function writePathFixState(
+  statePath,
+  { promptedFor = null, appliedFor = null } = {},
+) {
+  await mkdir(path.dirname(statePath), { recursive: true })
+  const payload = { version: PROMPT_STATE_VERSION, promptedFor, appliedFor }
+  await writeFile(statePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+}
 
 // 单引号转义：内部单引号写成 '\''，保证整段始终是一个词。
 const ESCAPED_POSIX_QUOTE = String.raw`'\''`
@@ -99,6 +129,27 @@ function stripTrailingNewlines(value) {
   let end = value.length
   while (end > 0 && value[end - 1] === '\n') end -= 1
   return value.slice(0, end)
+}
+
+export function hasShellRcBlock(content) {
+  return String(content ?? '').includes(RC_MARKER_START)
+}
+
+// 某个目录是否已经写过 PATH。Windows 无从查证（注册表），靠状态文件里的
+// appliedFor；POSIX 可以直接看 shell rc 里有没有含该目录的标记块——这比只信
+// 状态文件更可靠，用户手工删掉块也能被察觉。
+export async function isPathFixApplied({
+  binDir,
+  platform = process.platform,
+  home = os.homedir(),
+  shellPath = process.env.SHELL,
+  exists,
+  fileSystem = { readFile },
+}) {
+  if (platform === 'win32' || !binDir) return false
+  const rcPath = resolveShellRcPath({ home, shellPath, exists })
+  const content = await fileSystem.readFile(rcPath, 'utf8').catch(() => '')
+  return hasShellRcBlock(content) && String(content).includes(binDir)
 }
 
 // 用 indexOf 定位标记块而不是正则：跨行匹配需要 .+? 这类量词，同样会触发
