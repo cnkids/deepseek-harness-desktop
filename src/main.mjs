@@ -37,7 +37,7 @@ import {
   updateGlobalDsh,
   writeDshUpdateCache,
 } from './dsh-runtime.mjs'
-import { resolveNodeEnvironment } from './node-runtime.mjs'
+import { findCompatibleSystemNode, resolveNodeEnvironment } from './node-runtime.mjs'
 import { applyUserPathFix, hasPathEntry } from './dsh-path.mjs'
 import {
   isAllowedNavigationUrl,
@@ -320,14 +320,32 @@ async function resolveWorkspacePath() {
   return process.cwd()
 }
 
+// 读取启动缓存，并在缓存锁定私有 runtime 时做一次便宜复核：用户可能在本机还
+// 没有 Node.js 时装过应用，后来又装了兼容的系统 Node.js，那就必须改用系统
+// Node——否则 dsh 永远留在私有 runtime 里，用户的终端里拿不到 dsh 命令。
+// 复核跳过登录 shell 探测，避免每次启动都付出拉起登录 shell 的开销。
+async function readUsableStartupCache(startupCachePath, shouldUseStartupCache) {
+  if (!shouldUseStartupCache) return null
+  const startupCache = await readStartupCache(startupCachePath)
+  if (startupCache?.nodeEnvironment.source === 'managed') {
+    const systemNode = await findCompatibleSystemNode({
+      platform: process.platform,
+      loginShell: false,
+    })
+    if (systemNode) return null
+  }
+  return startupCache
+}
+
 async function launchHarness() {
   const runtimeRoot = path.join(app.getPath('userData'), 'runtime')
   const startupCachePath = path.join(app.getPath('userData'), 'cache', 'startup.json')
   const shouldUseStartupCache =
     !process.env.DSH_DESKTOP_NODE && !process.env.DSH_DESKTOP_DSH
-  const startupCache = shouldUseStartupCache
-    ? await readStartupCache(startupCachePath)
-    : null
+  const startupCache = await readUsableStartupCache(
+    startupCachePath,
+    shouldUseStartupCache,
+  )
 
   let nodeEnvironment
   let installed

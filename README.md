@@ -272,6 +272,11 @@ npm run release -- 0.3.0
 
 ## 版本记录
 
+### 0.2.7
+
+- 修复 0.2.6 的「系统 Node 优先」对**已经跑过应用**的机器不生效：启动缓存会把上次解析出的环境固化下来（很可能就是私有 runtime），`launchHarness` 命中缓存后直接复用，根本不会再走新的探测顺序。现在缓存里是私有 runtime 时会做一次便宜复核——`findCompatibleSystemNode({ loginShell: false })`，跳过登录 shell 探测以免每次启动都付这笔开销——一旦发现兼容的系统 Node.js 就丢弃缓存重新解析。
+- 于是"先装了 Node.js 却一直用私有 runtime"的机器升级后首次启动即可切到系统 Node，`dsh` 会装进用户自己的全局 npm 环境，托盘也会出现「修复 dsh 命令（加入 PATH）」（当该目录不在 `PATH` 上时）。
+
 ### 0.2.6
 
 - 修复「本机已经装了 Node.js，却依然拿不到 `dsh` 命令」：`resolveNodeEnvironment` 此前只要发现私有 runtime 就无条件复用它，于是先装好 Node.js 的机器仍然把 `dsh` 装进应用私有目录，用户终端里永远看不到。现在改为**优先使用兼容的系统 Node.js**，与 README 一直承诺的「环境自适应」一致；私有 runtime 只在没有兼容系统 Node.js 时兜底。

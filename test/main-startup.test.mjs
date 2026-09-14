@@ -23,6 +23,15 @@ test('main process registers the single instance guard before ready', async () =
   assert.match(source, /app\.quit\(\)/)
 })
 
+// 回归守卫：启动缓存会把「用私有 runtime」这个决定固化下来，用户后来装了兼容的
+// 系统 Node.js 也不会生效。缓存里是私有 runtime 时必须做一次便宜复核。
+test('main process re-checks a managed startup cache against a system Node', async () => {
+  const source = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /startupCache\?\.nodeEnvironment\.source === 'managed'/)
+  assert.match(source, /findCompatibleSystemNode\(\{[\s\S]*?loginShell: false,/)
+})
+
 // 回归守卫：托盘不再提供「打开 Harness 命令行」入口——该能力已移除，
 // 无系统 Node.js 的场景改由 README 的安装说明覆盖。
 test('main process no longer ships a console launcher', async () => {

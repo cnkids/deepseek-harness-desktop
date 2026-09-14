@@ -7,6 +7,7 @@ import {
   MANAGED_NODE_VERSION,
   REQUIRED_NODE_RANGE,
   downloadArchive,
+  findCompatibleSystemNode,
   findInstalledManagedNode,
   getNodeArtifact,
   inspectNodeInstallation,
@@ -64,6 +65,14 @@ test('detects the current development Node installation when npm is available', 
   assert.equal(installation.source, 'system')
   assert.equal(installation.nodePath, process.execPath)
   assert.match(installation.npxCliPath, /npx-cli\.js$/)
+})
+
+// 启动缓存复核用这条路径：不拉登录 shell 也要能找到系统 Node（CI 与开发机都把
+// node 放在 PATH 上），否则缓存里的私有 runtime 会被一直沿用。
+test('finds a compatible system Node without probing a login shell', async () => {
+  const installation = await findCompatibleSystemNode({ loginShell: false })
+  assert.ok(installation)
+  assert.equal(installation.source, 'system')
 })
 
 test('reuses an already installed managed runtime without system discovery', async () => {
