@@ -8,7 +8,11 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>正在启动 DeepSeek Harness</title>
-    <link rel="stylesheet" href="./loading.css" />
+    <link rel="stylesheet" href="./loading/base.css" />
+    <link rel="stylesheet" href="./loading/layout.css" />
+    <link rel="stylesheet" href="./loading/trace.css" />
+    <link rel="stylesheet" href="./loading/responsive.css" />
+    <link rel="stylesheet" href="./loading/animations.css" />
   </head>
   <body>
     <div class="atmosphere" aria-hidden="true">
@@ -122,7 +126,7 @@
       <span id="runtime-hint">环境自适应 · Windows / macOS / Linux</span>
     </footer>
 
-    <script src="./background.js"></script>
+    <script type="module" src="./background.js"></script>
     <script type="module" src="./hero-whale.js"></script>
     <script src="./loading.js"></script>
   </body>

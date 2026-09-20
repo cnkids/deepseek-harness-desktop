@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import semver from 'semver'
+import { windowsSystemBinary } from './system-binaries.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -168,7 +169,9 @@ async function findPathCandidates(platform, env) {
   if (env.DSH_DESKTOP_DSH) candidates.push(env.DSH_DESKTOP_DSH)
 
   if (platform === 'win32') {
-    const output = await commandOutput('where.exe', ['dsh.cmd'], { env })
+    // 用 SystemRoot 下的绝对路径调用 where：按名字解析会把"查找命令"这件事交给
+    // PATH 上任意一个同名程序。
+    const output = await commandOutput(windowsSystemBinary('where', env), ['dsh.cmd'], { env })
     if (output) candidates.push(...output.split(/\r?\n/))
     return candidates
   }
@@ -252,11 +255,16 @@ export async function updateGlobalDsh({
   env = process.env,
   registry = null,
 }) {
+  // 版本号来自软件源，是唯一会进入 npm 安装参数的外部数据：这里再做一次
+  // 纵深防御，只放行合法 semver（或字面量 latest）。
+  const target = version === 'latest' ? 'latest' : semver.valid(semver.clean(String(version ?? '')))
+  if (!target) throw new Error('拒绝安装无效的 Harness 版本号。')
+
   const args = [
     npmCliPath(nodeEnvironment),
     'install',
     '--global',
-    `${DSH_PACKAGE_NAME}@${version}`,
+    `${DSH_PACKAGE_NAME}@${target}`,
   ]
   // 通过 npm_config_registry 环境变量指定软件源：既避免把外部数据拼进命令行
   // 参数，也与 buildHarnessEnvironment 注入 npm 配置的方式保持一致。

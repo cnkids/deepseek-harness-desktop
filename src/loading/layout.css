@@ -1,0 +1,234 @@
+.app-header,
+.startup-layout,
+.app-footer {
+  position: relative;
+  z-index: 10;
+  width: min(100% - 112px, 1216px);
+  margin-inline: auto;
+}
+
+.app-header {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-soft);
+  animation: enter-down 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.brand-lockup,
+.header-meta,
+.progress-labels,
+.trace-heading,
+.actions,
+.app-footer {
+  display: flex;
+  align-items: center;
+}
+
+.brand-lockup {
+  gap: 11px;
+}
+
+.brand-wordmark {
+  display: block;
+  width: 143px;
+  height: 23px;
+}
+
+.brand-pill {
+  padding: 4px 13px 5px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 18%),
+    0 0 18px rgb(255 255 255 / 14%);
+  color: rgb(255 255 255 / 88%); /* NOSONAR: 深色主题下对比度约 12:1，Sonar 未处理半透明背景 */
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.header-meta {
+  gap: 9px;
+  color: var(--text-description);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+
+.status-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #93b4ff;
+  box-shadow: 0 0 12px #6799fe;
+  animation: status-pulse 1.9s ease-in-out infinite;
+}
+
+.startup-layout {
+  height: calc(100vh - 128px);
+  min-height: 610px;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.94fr) minmax(480px, 1.06fr);
+  gap: clamp(52px, 8vw, 124px);
+  align-items: center;
+  padding: 46px 0 54px;
+}
+
+.startup-copy {
+  align-self: center;
+  max-width: 570px;
+  padding-left: 2px;
+  animation: enter-left 700ms 90ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.kicker,
+.trace-heading p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.kicker span,
+.trace-heading p {
+  margin-right: 12px;
+  color: #a8c1ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+}
+
+h1 {
+  max-width: 650px;
+  margin: 18px 0 0;
+  font-family: "Host Grotesk", "DM Sans", system-ui, sans-serif;
+  font-size: clamp(50px, 5.2vw, 76px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+#detail {
+  min-height: 52px;
+  max-width: 540px;
+  margin: 28px 0 0;
+  color: var(--text-description);
+  font-size: 16px;
+  line-height: 1.65;
+  text-wrap: pretty;
+  /* 启动失败时详情会带上 dsh 子进程的错误摘要，需要保留换行。 */
+  white-space: pre-line;
+}
+
+.progress-region {
+  max-width: 540px;
+  margin-top: 52px;
+}
+
+.progress-labels {
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--text-description);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.progress-track {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 14%);
+}
+
+.progress-track::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 16%), transparent);
+  transform: translateX(-100%);
+  animation: track-glint 2.8s ease-in-out infinite;
+}
+
+/* 未确定进度时由 ::before 播放流动动画；进入确定进度后隐藏它，改由原生
+   <progress> 的 value 驱动，既保留原有视觉又提供正确的可访问性语义。 */
+.progress-track::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 31%;
+  background: linear-gradient(90deg, #4c7fe6, #8db1ff, #fff);
+  box-shadow: 0 0 15px rgb(103 153 254 / 90%);
+  animation: loading 1.55s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+.progress-track.is-determinate::before {
+  display: none;
+}
+
+.progress-meter {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.progress-meter::-webkit-progress-bar {
+  background: transparent;
+}
+
+.progress-meter::-webkit-progress-value {
+  background: linear-gradient(90deg, #4c7fe6, #8db1ff, #fff);
+  box-shadow: 0 0 15px rgb(103 153 254 / 90%);
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.actions {
+  min-height: 42px;
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.privacy-note {
+  margin: 0;
+  color: rgb(255 255 255 / 34%);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+button {
+  min-height: 42px;
+  padding: 11px 19px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #fff;
+  color: #0a0a0a;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: transform 160ms ease, background-color 160ms ease, opacity 160ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  background: rgb(255 255 255 / 86%);
+}
+
+button:focus-visible {
+  outline: 2px solid #a8c1ff;
+  outline-offset: 4px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+

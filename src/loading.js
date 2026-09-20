@@ -20,7 +20,8 @@ globalThis.requestAnimationFrame(() => {
 function resolveStage(status) {
   const text = `${status.message || ''} ${status.detail || ''}`
   if (/已启动|界面|等待 Harness|本地端口|Web UI/i.test(text)) return 3
-  if (/DeepSeek Harness 已就绪|准备 DeepSeek Harness|安装 DeepSeek Harness|更新 DeepSeek Harness|插件|依赖/i.test(text)) return 2
+  // 「Harness 已更新」是运行中更新完成、即将重启的那一步，属于"插件装载/版本落地"阶段。
+  if (/DeepSeek Harness 已就绪|准备 DeepSeek Harness|安装 DeepSeek Harness|更新 DeepSeek Harness|Harness 已更新|插件|依赖/i.test(text)) return 2
   if (/Harness 更新|npm 官方|版本|联网检查/i.test(text)) return 1
   return 0
 }

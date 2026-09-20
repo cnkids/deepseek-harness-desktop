@@ -21,6 +21,17 @@ test('honours a custom mirror override', () => {
   assert.equal(mirrors[1], NODE_DIST_MIRRORS[0])
 })
 
+// 安全守卫：镜像决定下载哪个 Node.js 运行时，明文 http / file: 一律忽略。
+test('ignores an insecure custom mirror override', () => {
+  for (const unsafe of ['http://mirror.example.com', 'file:///tmp/node', 'nonsense']) {
+    const mirrors = getNodeDistMirrors({ DSH_DESKTOP_NODE_MIRROR: unsafe })
+    assert.deepEqual(mirrors, [...NODE_DIST_MIRRORS], `应忽略 ${unsafe}`)
+  }
+
+  const local = getNodeDistMirrors({ DSH_DESKTOP_NODE_MIRROR: 'http://localhost:8080/node' })
+  assert.equal(local[0], 'http://localhost:8080/node')
+})
+
 test('probes SHASUMS256.txt with HEAD before downloading', async () => {
   const visited = []
   const fetchImpl = async (url, options) => {

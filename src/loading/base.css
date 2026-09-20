@@ -1,0 +1,145 @@
+@font-face {
+  font-family: "DM Sans";
+  src: url("../assets/fonts/dm-sans-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DM Sans";
+  src: url("../assets/fonts/dm-sans-500.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Host Grotesk";
+  src: url("../assets/fonts/host-grotesk-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "DM Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #fff;
+  background: #0a0a0a;
+  --brand: #6799fe;
+  --text-primary: #fff;
+  --text-secondary: rgb(255 255 255 / 80%);
+  --text-description: rgb(255 255 255 / 50%);
+  --surface: rgb(255 255 255 / 6%);
+  --surface-soft: rgb(255 255 255 / 3%);
+  --border: rgb(255 255 255 / 15%);
+  --border-soft: rgb(255 255 255 / 8%);
+  --error: #ff7a7a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: #0a0a0a;
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.atmosphere,
+.canvas-layer,
+.canvas-layer canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.atmosphere {
+  z-index: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 76% 18%, rgb(43 76 139 / 42%), transparent 42%),
+    radial-gradient(circle at 18% 38%, rgb(26 56 112 / 48%), transparent 38%),
+    #0a0a0a;
+  opacity: 0;
+  transition: opacity 500ms ease-out;
+}
+
+.is-shell-ready .atmosphere {
+  opacity: 1;
+}
+
+.canvas-layer {
+  overflow: hidden;
+  opacity: 1;
+  mask: linear-gradient(rgb(0 0 0 / 99%) 0%, rgb(0 0 0 / 91%) 8.98%, transparent 100%);
+  -webkit-mask: linear-gradient(rgb(0 0 0 / 99%) 0%, rgb(0 0 0 / 91%) 8.98%, transparent 100%);
+}
+
+.canvas-fluid-layer {
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 650ms ease-out;
+}
+
+.is-fluid-ready .canvas-fluid-layer {
+  opacity: 1;
+}
+
+.canvas-grid-layer {
+  z-index: 5;
+}
+
+.canvas-layer canvas {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.hero-particle-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hero-particle-stage {
+  width: 800px;
+  height: 800px;
+  margin-left: 100px;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.hero-particle-stage canvas {
+  display: block;
+  width: 800px;
+  height: 800px;
+  background: transparent;
+}
+

@@ -1,569 +1,39 @@
-import { spawn } from 'node:child_process'
-import { chmod, copyFile, readdir, rename, rm, stat } from 'node:fs/promises'
-import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  app,
-  BrowserWindow,
-  clipboard,
-  dialog,
-  ipcMain,
-  Menu,
-  nativeImage,
-  nativeTheme,
-  net as electronNet,
-  session,
-  shell,
-  Tray,
-} from 'electron'
-import {
-  downloadReleaseAsset,
-  fetchAvailableUpdate,
-} from './app-update.mjs'
-import {
-  createApplicationMenuTemplate,
-  createWebContextMenuTemplate,
-} from './edit-menu.mjs'
-import { summarizeHarnessFailure } from './harness-diagnostics.mjs'
-import { fetchLatestDshVersion, resolveDshRegistries } from './dsh-registry.mjs'
-import {
-  buildHarnessEnvironment,
-  DSH_PACKAGE_NAME,
-  findUserDshInstallation,
-  isDshUpdateRequired,
-  parseDshLaunchUrl,
-  readDshUpdateCache,
-  updateGlobalDsh,
-  writeDshUpdateCache,
-} from './dsh-runtime.mjs'
-import { findCompatibleSystemNode, resolveNodeEnvironment } from './node-runtime.mjs'
-import {
-  applyUserPathFix,
-  hasPathEntry,
-  isPathFixApplied,
-  readPathFixState,
-  writePathFixState,
-} from './dsh-path.mjs'
-import {
-  isAllowedNavigationUrl,
-  isAllowedRendererPermission,
-  isTrustedIpcSender,
-} from './security-policy.mjs'
-import { readStartupCache, writeStartupCache } from './startup-cache.mjs'
+import { app, ipcMain, Menu, net as electronNet, shell } from 'electron'
+import { downloadReleaseAsset, fetchAvailableUpdate } from './app-update.mjs'
+import { createApplicationMenuTemplate } from './edit-menu.mjs'
+import { isTrustedIpcSender } from './security-policy.mjs'
+import { createDshCommandController } from './dsh-command.mjs'
+import { createHarnessLauncher } from './harness-launcher.mjs'
+import { createTrayController } from './tray.mjs'
+import { createWindowController } from './window.mjs'
+import { createDesktopUpdateController } from './updates/desktop-update.mjs'
+import { createDshUpdateController } from './updates/dsh-update-controller.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const STARTUP_TIMEOUT_MS = 10 * 60_000
-const DSH_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
-const DSH_UPDATE_RETRY_INTERVAL_MS = 5 * 60_000
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60_000
-const DESKTOP_UPDATE_READY_MAX_AGE_MS = 48 * 60 * 60_000
 const LOADING_HTML_PATH = path.join(__dirname, 'loading.html')
-// 启动失败时用于回溯原因的 dsh 输出行数上限。
-const HARNESS_OUTPUT_LIMIT = 200
+const BRAND_DIR = path.join(__dirname, 'assets', 'brand')
 // electron-builder 的便携版会把可执行文件所在目录写入该变量。便携版不能像
 // 安装版那样用 NSIS 安装包覆盖自己，因此只提示手动下载新版本。
 const IS_PORTABLE_BUILD =
   process.platform === 'win32' && Boolean(process.env.PORTABLE_EXECUTABLE_DIR)
 
-let mainWindow = null
-let tray = null
-let dshProcess = null
-let startupPromise = null
-let harnessOrigin = null
-let harnessLaunchUrl = null
+// 主进程引导与装配：各控制器职责见 window.mjs / tray.mjs / harness-launcher.mjs /
+// dsh-command.mjs / updates/*。这里只负责创建它们、接线回调、处理退出。
 let isQuitting = false
-let desktopUpdateCheck = null
-let desktopUpdateTimeout = null
-let desktopUpdateInterval = null
-let desktopUpdateState = { status: 'idle', progress: null, update: null, file: null }
-let desktopUpdatePrompt = null
-// dsh 装好了但目录不在用户 PATH 上时记在这里，用于托盘的修复入口与一次性提示。
-// 用系统 Node.js 时记录 dsh 的位置与 PATH 状态，供托盘常驻行与一次性提示使用。
-// undefined 表示还没启动完成（此时托盘不显示该行）。
-let dshCommandState
-// 从 userData/cache/dsh-path.json 读入：记过提示与成功修复过的目录。
-let dshPathState = { promptedFor: null, appliedFor: null }
-let dshPathPrompted = false
-
-function dshPathStatePath() {
-  return path.join(app.getPath('userData'), 'cache', 'dsh-path.json')
-}
-
-function emitStatus(message, detail = '', progress = null, error = false) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents.send('runtime-status', { message, detail, progress, error })
-}
-
-function formatBytes(bytes) {
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function reportNodeProgress(event) {
-  switch (event.phase) {
-    case 'download-start':
-      emitStatus(
-        '正在安装私有 Node.js',
-        event.source === 'mirror' ? `通过国内镜像下载 ${event.file}` : `准备下载 ${event.file}`,
-        0,
-      )
-      break
-    case 'download': {
-      const progress = event.total ? Math.round((event.received / event.total) * 100) : null
-      const total = event.total ? ` / ${formatBytes(event.total)}` : ''
-      emitStatus(
-        '正在下载私有 Node.js',
-        `${formatBytes(event.received)}${total}`,
-        progress,
-      )
-      break
-    }
-    case 'verify':
-      emitStatus('正在校验 Node.js', '验证官方安装包的 SHA-256', 100)
-      break
-    case 'extract':
-      emitStatus('正在安装私有 Node.js', '正在解压应用私有运行时', null)
-      break
-    default:
-      break
-  }
-}
-
-async function getAvailablePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    server.unref()
-    server.once('error', reject)
-    server.listen({ host: '127.0.0.1', port: 0 }, () => {
-      const address = server.address()
-      const port = typeof address === 'object' && address ? address.port : null
-      server.close((error) => {
-        if (error) reject(error)
-        else if (port) resolve(port)
-        else reject(new Error('无法分配本地端口。'))
-      })
-    })
-  })
-}
-
-function appendProcessOutput(stream, channel, onLine) {
-  if (!stream) return
-  let buffer = ''
-  stream.setEncoding('utf8')
-  stream.on('data', (chunk) => {
-    buffer += chunk
-    const lines = buffer.split(/\r?\n/)
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed) {
-        console[channel](`[dsh] ${trimmed}`)
-        onLine?.(trimmed)
-      }
-    }
-  })
-}
-
-async function waitForHarness(url, child, getLaunchUrl, timeoutMs = STARTUP_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs
-  let exited = false
-  let exitCode = null
-  let spawnFailure = null
-  let firstUnauthorizedAt = 0
-  child.once('exit', (code) => {
-    exited = true
-    exitCode = code
-  })
-  child.once('error', (error) => {
-    // A failed spawn emits 'error' without ever emitting 'exit', so treat it
-    // as a terminal failure instead of polling for the whole timeout window.
-    spawnFailure = error
-  })
-
-  while (Date.now() < deadline) {
-    if (spawnFailure) {
-      throw new Error(`Harness 启动进程失败：${spawnFailure.message}`)
-    }
-    if (exited) throw new Error(`Harness 启动进程已退出（代码 ${exitCode ?? '未知'}）。`)
-    const launchUrl = getLaunchUrl?.() ?? null
-    if (firstUnauthorizedAt && !launchUrl && Date.now() - firstUnauthorizedAt >= 30_000) {
-      throw new Error('Harness 需要浏览器认证，但未能从启动输出中读取访问链接。')
-    }
-    try {
-      const response = await electronNet.fetch(launchUrl ?? url, {
-        signal: AbortSignal.timeout(2_000),
-      })
-      if (response.ok) return launchUrl ?? url
-      if (response.status === 401 && firstUnauthorizedAt === 0) {
-        firstUnauthorizedAt = Date.now()
-      }
-    } catch {
-      // The local server is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 400))
-  }
-  throw new Error(`Harness 在 ${Math.round(timeoutMs / 1000)} 秒内未能启动。`)
-}
-
-async function resolveLatestDshVersion(installedVersion = null) {
-  const cachePath = path.join(app.getPath('userData'), 'cache', 'dsh-update.json')
-  const cached = await readDshUpdateCache(cachePath)
-  const cacheMaxAge = cached?.successful
-    ? DSH_UPDATE_CHECK_INTERVAL_MS
-    : DSH_UPDATE_RETRY_INTERVAL_MS
-  if (cached && Date.now() - cached.checkedAt < cacheMaxAge) {
-    emitStatus('Harness 版本检查完成', `复用最近检查结果 ${cached.version}`, null)
-    return { version: cached.version, registry: cached.registry ?? null }
-  }
-
-  emitStatus('正在检查 Harness 更新', '依次查询 npm 官方源与国内镜像', null)
-  try {
-    const { version, registry } = await fetchLatestDshVersion({
-      fetchImpl: electronNet.fetch,
-      registries: resolveDshRegistries(),
-    })
-    await writeDshUpdateCache(cachePath, version, Date.now(), true, registry)
-    if (!registry.includes('registry.npmjs.org')) {
-      emitStatus('Harness 版本检查完成', `使用镜像源 ${registry}`, null)
-    }
-    return { version, registry }
-  } catch (error) {
-    console.warn('[dsh] update check failed', error)
-    emitStatus('无法联网检查 Harness 更新', '如已安装，将继续使用当前版本', null)
-    const fallbackVersion = cached?.version ?? installedVersion
-    if (fallbackVersion) {
-      try {
-        await writeDshUpdateCache(
-          cachePath,
-          fallbackVersion,
-          Date.now(),
-          false,
-          cached?.registry ?? null,
-        )
-      } catch (cacheError) {
-        console.warn('[dsh] unable to cache failed update check', cacheError)
-      }
-    }
-    return { version: fallbackVersion, registry: cached?.registry ?? null }
-  }
-}
-
-function stopHarness() {
-  const child = dshProcess
-  dshProcess = null
-  if (!child || child.killed) return
-
-  // Windows 没有面向子进程的进程组信号：child.kill('SIGTERM') 只会结束直接
-  // 子进程，而 dsh web 还会派生自己的子进程，它们会在应用退出后变成孤儿进程
-  // 继续占用端口。taskkill /T 会连同整棵进程树一起结束。
-  if (process.platform === 'win32' && typeof child.pid === 'number') {
-    const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    killer.on('error', (error) => {
-      console.warn('[dsh] unable to terminate the harness process tree', error)
-      child.kill('SIGKILL')
-    })
-    return
-  }
-
-  child.kill('SIGTERM')
-  const timer = setTimeout(() => {
-    if (child.exitCode === null) child.kill('SIGKILL')
-  }, 5_000)
-  timer.unref()
-}
-
-async function prepareDshInstallation(nodeEnvironment, latestVersion, env, installed, registry = null) {
-  const isSystemRuntime = nodeEnvironment.source === 'system'
-  const scopeLabel = isSystemRuntime ? '用户全局环境' : '应用私有环境'
-
-  if (installed && !isDshUpdateRequired(installed.version, latestVersion)) {
-    const versionState = latestVersion ? '已是最新版本' : '使用已安装版本'
-    emitStatus('DeepSeek Harness 已就绪', `${versionState} ${installed.version} · ${scopeLabel}`, null)
-    return installed
-  }
-
-  const targetVersion = latestVersion ?? 'latest'
-  const isUpdate = Boolean(installed)
-  emitStatus(
-    isUpdate ? '正在更新 DeepSeek Harness' : '正在安装 DeepSeek Harness',
-    `${scopeLabel} · ${DSH_PACKAGE_NAME}@${targetVersion}`,
-    null,
-  )
-
-  try {
-    const installation = await updateGlobalDsh({
-      nodeEnvironment,
-      version: targetVersion,
-      platform: process.platform,
-      env,
-      registry,
-    })
-    if (!installation) throw new Error('npm 完成后未找到 dsh 全局安装')
-    return installation
-  } catch (error) {
-    if (installed) {
-      console.warn('[dsh] update failed, using installed version', error)
-      emitStatus(
-        'Harness 更新失败',
-        `继续使用已安装版本 ${installed.version} · ${scopeLabel}`,
-        null,
-      )
-      return installed
-    }
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`无法在${scopeLabel}安装 DeepSeek Harness：${reason}`)
-  }
-}
-
-async function resolveWorkspacePath() {
-  // 打包后默认在用户的“文档”目录中运行 Harness。OneDrive 重定向、目录被删除
-  // 或组策略移除都会让 app.getPath 指向不存在的位置，导致 spawn 以 ENOENT
-  // 直接失败，因此依次回退到主目录与应用数据目录。
-  const candidates = app.isPackaged ? ['documents', 'home', 'userData'] : []
-  for (const name of candidates) {
-    try {
-      const directory = app.getPath(name)
-      if ((await stat(directory)).isDirectory()) return directory
-    } catch {
-      // 该候选目录不可用，继续尝试下一个。
-    }
-  }
-  return process.cwd()
-}
-
-// 读取启动缓存，并在缓存锁定私有 runtime 时做一次便宜复核：用户可能在本机还
-// 没有 Node.js 时装过应用，后来又装了兼容的系统 Node.js，那就必须改用系统
-// Node——否则 dsh 永远留在私有 runtime 里，用户的终端里拿不到 dsh 命令。
-// 复核跳过登录 shell 探测，避免每次启动都付出拉起登录 shell 的开销。
-async function readUsableStartupCache(startupCachePath, shouldUseStartupCache) {
-  if (!shouldUseStartupCache) return null
-  const startupCache = await readStartupCache(startupCachePath)
-  if (startupCache?.nodeEnvironment.source === 'managed') {
-    const systemNode = await findCompatibleSystemNode({
-      platform: process.platform,
-      loginShell: false,
-    })
-    if (systemNode) return null
-  }
-  return startupCache
-}
-
-async function launchHarness() {
-  const runtimeRoot = path.join(app.getPath('userData'), 'runtime')
-  const startupCachePath = path.join(app.getPath('userData'), 'cache', 'startup.json')
-  const shouldUseStartupCache =
-    !process.env.DSH_DESKTOP_NODE && !process.env.DSH_DESKTOP_DSH
-  const startupCache = await readUsableStartupCache(
-    startupCachePath,
-    shouldUseStartupCache,
-  )
-
-  let nodeEnvironment
-  let installed
-  if (startupCache) {
-    nodeEnvironment = startupCache.nodeEnvironment
-    installed = startupCache.dshInstallation
-    emitStatus(
-      '正在复用上次运行环境',
-      `${nodeEnvironment.source === 'system' ? '用户' : '应用私有'} Node.js ${nodeEnvironment.version} · Harness ${installed.version}`,
-      null,
-    )
-  } else {
-    emitStatus('正在检查运行环境', '查找兼容的 Node.js 与 npx', null)
-    nodeEnvironment = await resolveNodeEnvironment({
-      runtimeRoot,
-      platform: process.platform,
-      arch: process.arch,
-      fetchImpl: electronNet.fetch,
-      onProgress: reportNodeProgress,
-    })
-
-    const baseEnvironment = buildHarnessEnvironment(nodeEnvironment)
-    installed = await findUserDshInstallation({
-      nodeEnvironment,
-      platform: process.platform,
-      env: baseEnvironment,
-      includePath: nodeEnvironment.source === 'system',
-    })
-  }
-
-  const runtimeLabel = nodeEnvironment.source === 'system' ? '用户 Node.js' : '应用私有 Node.js'
-  emitStatus(
-    '运行环境已就绪',
-    `使用${runtimeLabel} ${nodeEnvironment.version}（${process.platform}/${process.arch}）`,
-    null,
-  )
-
-  const baseEnvironment = buildHarnessEnvironment(nodeEnvironment)
-  const { version: latestVersion, registry } = await resolveLatestDshVersion(installed?.version)
-  const dshInstallation = await prepareDshInstallation(
-    nodeEnvironment,
-    latestVersion,
-    baseEnvironment,
-    installed,
-    registry,
-  )
-  if (shouldUseStartupCache) {
-    try {
-      await writeStartupCache(startupCachePath, nodeEnvironment, dshInstallation)
-    } catch (error) {
-      console.warn('[startup] unable to persist environment cache', error)
-    }
-  }
-
-  const port = await getAvailablePort()
-  const url = `http://127.0.0.1:${port}`
-  const workspacePath = await resolveWorkspacePath()
-  dshPathState = await readPathFixState(dshPathStatePath())
-  dshCommandState = detectDshCommandState(nodeEnvironment, dshInstallation)
-  if (dshCommandState?.needsPathFix) {
-    // 已经为这个目录写过用户 PATH / shell rc 时不再当作"缺失"：GUI 应用自身的
-    // process.env.PATH 不会因此改变（macOS 上尤其明显），只看 PATH 会反复提示。
-    const applied =
-      dshPathState.appliedFor === dshCommandState.binDir ||
-      (await isPathFixApplied({ binDir: dshCommandState.binDir }))
-    if (applied) dshCommandState.needsPathFix = false
-  }
-  const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [
-    dshInstallation.binDir,
-  ])
-
-  const child = spawn(
-    nodeEnvironment.nodePath,
-    [
-      dshInstallation.binPath,
-      'web',
-      '--no-open',
-      '--port',
-      String(port),
-    ],
-    {
-      cwd: workspacePath,
-      env: harnessEnvironment,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    },
-  )
-  dshProcess = child
-  let harnessReady = false
-  let authenticatedUrl = null
-  // 保留最近的子进程输出：启动失败时要把 dsh 真正报的错带到启动页，
-  // 否则用户只能看到“进程意外退出（代码 1）”。
-  const harnessOutput = []
-  const recordHarnessLine = (line) => {
-    harnessOutput.push(line)
-    if (harnessOutput.length > HARNESS_OUTPUT_LIMIT) harnessOutput.shift()
-  }
-  appendProcessOutput(child.stdout, 'log', (line) => {
-    recordHarnessLine(line)
-    // dsh web protects its UI with a per-process launch token printed on
-    // stdout ("dsh web: http://127.0.0.1:PORT/?token=..."); the first request
-    // carrying the token exchanges it for a signed session cookie.
-    if (!authenticatedUrl) {
-      const launchUrl = parseDshLaunchUrl(line, { port })
-      if (launchUrl) {
-        authenticatedUrl = launchUrl
-        harnessLaunchUrl = launchUrl
-      }
-    }
-  })
-  appendProcessOutput(child.stderr, 'error', recordHarnessLine)
-  child.once('error', (error) => {
-    console.error('[dsh] process error', error)
-  })
-  child.once('exit', (code, signal) => {
-    if (!harnessReady || dshProcess !== child || isQuitting) return
-    dshProcess = null
-    harnessOrigin = null
-    harnessLaunchUrl = null
-    const exitReason = signal ?? `代码 ${code ?? '未知'}`
-    mainWindow
-      .loadFile(LOADING_HTML_PATH)
-      .then(() => {
-        const summary = summarizeHarnessFailure(harnessOutput)
-        emitStatus(
-          'Harness 已停止',
-          summary
-            ? `后台进程意外退出（${exitReason}）。\n${summary}`
-            : `后台进程意外退出（${exitReason}）。`,
-          null,
-          true,
-        )
-      })
-      .catch((error) => {
-        console.warn('[dsh] unable to restore the loading page', error)
-      })
-  })
-
-  emitStatus(
-    '正在等待 Harness 界面',
-    `启动版本 ${dshInstallation.version} · ${url}`,
-    null,
-  )
-  let readyUrl
-  try {
-    readyUrl = await waitForHarness(url, child, () => authenticatedUrl)
-  } catch (error) {
-    // 附上 dsh 自己报的错，插件缺失、端口占用这类问题才可自助排查。
-    const summary = summarizeHarnessFailure(harnessOutput)
-    throw summary ? new Error(`${error.message}\n${summary}`) : error
-  }
-  harnessReady = true
-  harnessOrigin = new URL(url).origin
-  emitStatus('Harness 已启动', url, 100)
-  await mainWindow.loadURL(readyUrl)
-  promptDshPathFix()
-}
-
-async function startApplication() {
-  if (startupPromise) return startupPromise
-  startupPromise = (async () => {
-    stopHarness()
-    harnessOrigin = null
-    harnessLaunchUrl = null
-    await mainWindow.loadFile(LOADING_HTML_PATH)
-    try {
-      await launchHarness()
-    } catch (error) {
-      stopHarness()
-      console.error(error)
-      emitStatus(
-        '启动失败',
-        error instanceof Error ? error.message : String(error),
-        null,
-        true,
-      )
-    } finally {
-      startupPromise = null
-    }
-  })()
-  return startupPromise
-}
-
-function isAllowedLocalUrl(targetUrl) {
-  return isAllowedNavigationUrl(targetUrl, {
-    loadingHtmlPath: LOADING_HTML_PATH,
-    harnessOrigin,
-  })
-}
-
-function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow()
-    return
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
+const state = {
+  windows: null,
+  tray: null,
+  launcher: null,
+  dshCommand: null,
+  dshUpdate: null,
+  desktopUpdate: null,
 }
 
 function quitApplication() {
   isQuitting = true
-  stopHarness()
+  state.launcher?.stop()
   app.quit()
 }
 
@@ -573,480 +43,95 @@ function restartApplication() {
   quitApplication()
 }
 
-function setDesktopUpdateState(status, values = {}) {
-  const has = (key) => Object.hasOwn(values, key)
-  desktopUpdateState = {
-    status,
-    progress: values.progress ?? null,
-    update: has('update') ? values.update : desktopUpdateState.update,
-    file: has('file') ? values.file : desktopUpdateState.file,
-    error: values.error ?? null,
-    readyAt: status === 'ready' ? Date.now() : null,
-  }
+function showMainWindow() {
+  state.windows?.show()
 }
 
-function showMessageBox(options) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-    return dialog.showMessageBox(mainWindow, options)
-  }
-  return dialog.showMessageBox(options)
+// 窗口建好后触发一次启动流程。start() 内部会把失败报到启动页，因此这里不需要
+// 再处理它的返回值。
+function startHarness() {
+  state.launcher?.start()
 }
 
-function desktopUpdateMenuLabel() {
-  if (IS_PORTABLE_BUILD) return `便携版 v${app.getVersion()}（手动更新）`
-  const version = desktopUpdateState.update?.manifest.version
-  switch (desktopUpdateState.status) {
-    case 'checking':
-      return '正在检查桌面端更新…'
-    case 'downloading':
-      return `正在下载桌面端 v${version}（${desktopUpdateState.progress ?? 0}%）`
-    case 'ready':
-      return `安装桌面端更新 v${version}`
-    case 'installing':
-      return `正在打开桌面端 v${version} 安装包…`
-    default:
-      return `检查桌面端更新（当前 v${app.getVersion()}）`
-  }
+function openHarnessInBrowser() {
+  const launcher = state.launcher
+  if (!launcher?.origin) return
+  // Reuse the token-carrying launch URL so an external browser can complete its
+  // own authentication exchange when it has no cookie yet.
+  void shell.openExternal(launcher.launchUrl ?? `${launcher.origin}/`)
 }
 
-async function replaceCurrentAppImage(downloadedFile) {
-  const currentAppImage = process.env.APPIMAGE
-  if (!currentAppImage || !path.isAbsolute(currentAppImage)) {
-    throw new Error('无法定位当前 AppImage。')
-  }
-
-  const stagedFile = `${currentAppImage}.update`
-  await rm(stagedFile, { force: true })
-  try {
-    await copyFile(downloadedFile, stagedFile)
-    await chmod(stagedFile, 0o755)
-    await rename(stagedFile, currentAppImage)
-  } catch (error) {
-    await rm(stagedFile, { force: true })
-    throw error
-  }
-
-  app.relaunch({ execPath: currentAppImage })
-  quitApplication()
-}
-
-async function removeOldDesktopUpdates(updatesRoot, keepDirectory) {
-  let entries
-  try {
-    entries = await readdir(updatesRoot, { withFileTypes: true })
-  } catch (error) {
-    if (error?.code === 'ENOENT') return
-    throw error
-  }
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory() && entry.name !== keepDirectory)
-      .map((entry) => rm(path.join(updatesRoot, entry.name), { recursive: true, force: true })),
-  )
-}
-
-async function installDesktopUpdate() {
-  const { update, file } = desktopUpdateState
-  if (!update || !file || desktopUpdateState.status !== 'ready') return
-  setDesktopUpdateState('installing', { update, file })
-
-  try {
-    if (process.platform === 'linux' && file.endsWith('.AppImage')) {
-      await replaceCurrentAppImage(file)
-      return
-    }
-
-    if (process.platform === 'win32') {
-      const openError = await shell.openPath(file)
-      if (openError) throw new Error(openError)
-      quitApplication()
-      return
-    }
-
-    const openError = await shell.openPath(file)
-    if (openError) throw new Error(openError)
-    setDesktopUpdateState('ready', { update, file })
-  } catch (error) {
-    console.error('[desktop-update] install failed', error)
-    setDesktopUpdateState('ready', { update, file, error })
-    await showMessageBox({
-      type: 'error',
-      title: '无法安装更新',
-      message: '无法打开桌面端更新',
-      detail: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
-function resolveInstallLabel(file) {
-  if (process.platform === 'linux' && file.endsWith('.AppImage')) return '重启并更新'
-  return process.platform === 'win32' ? '退出并安装' : '打开安装包'
-}
-
-async function promptDesktopUpdate() {
-  if (desktopUpdatePrompt) return desktopUpdatePrompt
-  const { update, file } = desktopUpdateState
-  if (!update || !file || desktopUpdateState.status !== 'ready') return
-
-  const version = update.manifest.version
-  const installLabel = resolveInstallLabel(file)
-
-  desktopUpdatePrompt = showMessageBox({
-    type: 'info',
-    title: '桌面端更新已就绪',
-    message: `DeepSeek Harness Desktop v${version} 已下载并通过完整性校验。`,
-    detail:
-      process.platform === 'darwin'
-        ? '打开 DMG 后，请将新版本拖入“应用程序”文件夹完成更新。'
-        : '现在安装，或稍后从系统托盘菜单继续。',
-    buttons: [installLabel, '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
+// 启动顺序：先建窗口控制器与更新控制器，再把它们接到启动流程与托盘上。
+function configureControllers() {
+  const userDataPath = app.getPath('userData')
+  const windows = createWindowController({
+    loadingHtmlPath: LOADING_HTML_PATH,
+    shouldQuit: () => isQuitting,
+    getHarnessOrigin: () => state.launcher?.origin ?? null,
+    onWindowCreated: startHarness,
   })
-    .then(({ response }) => {
-      if (response === 0) return installDesktopUpdate()
-    })
-    .finally(() => {
-      desktopUpdatePrompt = null
-    })
-  return desktopUpdatePrompt
-}
+  state.windows = windows
 
-async function checkForDesktopUpdate({ manual = false } = {}) {
-  if (!app.isPackaged) {
-    if (manual) {
-      await showMessageBox({
-        type: 'info',
-        title: '桌面端更新',
-        message: '开发模式不会检查桌面端更新。',
-      })
-    }
-    return
-  }
-  if (IS_PORTABLE_BUILD) {
-    if (manual) {
-      await showMessageBox({
-        type: 'info',
-        title: '桌面端更新',
-        message: `当前是便携版 v${app.getVersion()}。`,
-        detail: '便携版不会自动安装新版本，请从发布页下载新的便携版文件后替换。',
-      })
-    }
-    return
-  }
-  if (desktopUpdateState.status === 'ready') {
-    const readyAt = desktopUpdateState.readyAt ?? 0
-    if (Date.now() - readyAt >= DESKTOP_UPDATE_READY_MAX_AGE_MS) {
-      // An ignored download must not shadow newer releases forever: expire the
-      // pending state and fall through to a fresh check. A still-current
-      // package is reused from the verified download cache.
-      setDesktopUpdateState('idle', { update: null, file: null })
-    } else {
-      if (manual) await promptDesktopUpdate()
-      return
-    }
-  }
-  if (desktopUpdateCheck) return desktopUpdateCheck
-
-  desktopUpdateCheck = (async () => {
-    setDesktopUpdateState('checking', { update: null, file: null })
-    try {
-      const update = await fetchAvailableUpdate({
-        fetchImpl: electronNet.fetch,
-        currentVersion: app.getVersion(),
-        platform: process.platform,
-        arch: process.arch,
-        isAppImage: Boolean(process.env.APPIMAGE),
-      })
-      if (!update) {
-        setDesktopUpdateState('current', { update: null, file: null })
-        if (manual) {
-          await showMessageBox({
-            type: 'info',
-            title: '桌面端更新',
-            message: `当前已是最新版本 v${app.getVersion()}。`,
-          })
-        }
-        return
-      }
-
-      setDesktopUpdateState('downloading', { update, file: null, progress: 0 })
-      const updatesRoot = path.join(app.getPath('userData'), 'updates')
-      const versionDirectory = `v${update.manifest.version}`
-      const destination = path.join(
-        updatesRoot,
-        versionDirectory,
-        update.asset.name,
-      )
-      const file = await downloadReleaseAsset({
-        fetchImpl: electronNet.fetch,
-        asset: update.asset,
-        destination,
-        onProgress: ({ received, total }) => {
-          const progress = total ? Math.min(100, Math.round((received / total) * 100)) : null
-          setDesktopUpdateState('downloading', { update, progress })
-        },
-      })
-      try {
-        await removeOldDesktopUpdates(updatesRoot, versionDirectory)
-      } catch (error) {
-        console.warn('[desktop-update] unable to remove old downloads', error)
-      }
-      setDesktopUpdateState('ready', { update, file, progress: 100 })
-      await promptDesktopUpdate()
-    } catch (error) {
-      console.warn('[desktop-update] check failed', error)
-      setDesktopUpdateState('error', { update: null, file: null, error })
-      if (manual) {
-        await showMessageBox({
-          type: 'error',
-          title: '检查更新失败',
-          message: '暂时无法检查桌面端更新。',
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
-    } finally {
-      desktopUpdateCheck = null
-    }
-  })()
-  return desktopUpdateCheck
-}
-
-function scheduleDesktopUpdates() {
-  desktopUpdateTimeout = setTimeout(() => {
-    void checkForDesktopUpdate()
-  }, 5_000)
-  desktopUpdateInterval = setInterval(() => {
-    void checkForDesktopUpdate()
-  }, UPDATE_CHECK_INTERVAL_MS)
-  desktopUpdateTimeout.unref()
-  desktopUpdateInterval.unref()
-}
-
-function resolveTrayIconName() {
-  if (process.platform === 'darwin') return 'tray-icon.png'
-  return nativeTheme.shouldUseDarkColors ? 'tray-icon-dark.png' : 'tray-icon-light.png'
-}
-
-function createTrayImage() {
-  const assetName = resolveTrayIconName()
-  const iconPath = path.join(__dirname, 'assets', 'brand', assetName)
-  const iconSize = process.platform === 'darwin' ? 18 : 20
-  const trayImage = nativeImage.createFromPath(iconPath).resize({
-    width: iconSize,
-    height: iconSize,
+  state.dshCommand = createDshCommandController({
+    userDataPath,
+    showMessageBox: windows.showMessageBox,
   })
-  if (process.platform === 'darwin') trayImage.setTemplateImage(true)
-  return trayImage
-}
 
-function updateTrayTheme() {
-  if (tray) tray.setImage(createTrayImage())
-}
+  state.dshUpdate = createDshUpdateController({
+    fetchImpl: electronNet.fetch,
+    reportStatus: windows.reportStatus,
+    showMessageBox: windows.showMessageBox,
+    userDataPath,
+    getRuntime: () => state.launcher?.runtime ?? null,
+    stopHarness: () => state.launcher?.stop(),
+    restartHarness: () => state.launcher?.start(),
+    onInstallationChanged: (installation) => state.launcher?.rememberInstallation(installation),
+  })
 
-// 应用只在启动 Harness 时把私有 Node.js 与全局 dsh 目录注入子进程 PATH，
-// 用户自己的终端拿不到。这一点现在通过文档说明：想让 dsh 在自己的终端里
-// 可用，请安装一份兼容的 Node.js（见 README「在自己的终端里使用 dsh」）。
-// 只有用系统 Node.js 时才谈得上 PATH 修复：私有 runtime 目录里同时含 node 与
-// npm，把它加进用户 PATH 等于顺手给用户装一套 Node.js，代价不可接受。
-// undefined = 还没启动完成；null = 不适用（用了私有 runtime）；否则给出目录、
-// 版本与是否需要修复。托盘据此常驻一行自述状态，用户不必猜也便于排查。
-function detectDshCommandState(nodeEnvironment, dshInstallation) {
-  if (nodeEnvironment.source !== 'system' || !dshInstallation.binDir) return null
-  return {
-    binDir: dshInstallation.binDir,
-    version: nodeEnvironment.version,
-    needsPathFix: !hasPathEntry(process.env.PATH, dshInstallation.binDir),
-  }
-}
+  state.desktopUpdate = createDesktopUpdateController({
+    app,
+    shell,
+    fetchImpl: electronNet.fetch,
+    isPortableBuild: IS_PORTABLE_BUILD,
+    userDataPath,
+    showMessageBox: windows.showMessageBox,
+    quitApplication,
+    fetchUpdate: fetchAvailableUpdate,
+    downloadUpdate: downloadReleaseAsset,
+  })
 
-function dshCommandRow() {
-  if (dshCommandState === null) {
-    return { label: 'dsh 命令仅在应用内可用（应用私有 Node.js）', enabled: false }
-  }
-  if (dshCommandState.needsPathFix) {
-    return {
-      label: '修复 dsh 命令（加入 PATH）',
-      enabled: true,
-      click: () => {
-        void applyDshPathFix()
-      },
-    }
-  }
-  return {
-    label: `dsh 命令已可用（用户 Node.js ${dshCommandState.version}）`,
-    enabled: false,
-  }
-}
+  state.launcher = createHarnessLauncher({
+    app,
+    userDataPath,
+    fetchImpl: electronNet.fetch,
+    reportStatus: windows.reportStatus,
+    loadLoadingPage: windows.loadLoadingPage,
+    loadUrl: windows.loadUrl,
+    isQuitting: () => isQuitting,
+    dshCommand: state.dshCommand,
+    dshUpdate: state.dshUpdate,
+  })
 
-function dshCommandMenuItems() {
-  if (dshCommandState === undefined) return []
-  return [dshCommandRow(), { type: 'separator' }]
-}
-
-async function applyDshPathFix() {
-  const target = dshCommandState
-  if (!target?.needsPathFix) return
-  try {
-    const result = await applyUserPathFix({ binDir: target.binDir })
-    target.needsPathFix = false
-    // 记住已为这个目录写过 PATH：shell rc 的改动不会反映到应用自身的环境里，
-    // 不记下来就会每次启动都重复判定"还没修好"。
-    dshPathState = { ...dshPathState, appliedFor: target.binDir }
-    await writePathFixState(dshPathStatePath(), dshPathState)
-    await showMessageBox({
-      type: 'info',
-      title: 'dsh 命令已加入 PATH',
-      message: '请重新打开一个终端，再执行 dsh 命令。',
-      detail:
-        result.kind === 'shell-rc'
-          ? `已写入 ${result.detail}，新开的终端即可使用 dsh。`
-          : '已写入当前用户的 PATH，新开的终端即可使用 dsh。',
-    })
-  } catch (error) {
-    console.warn('[dsh-path] unable to update PATH', error)
-    await showMessageBox({
-      type: 'error',
-      title: '加入 PATH 失败',
-      message: '无法自动写入 PATH，请按 README 手动添加。',
-      detail: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
-// 同一个目录只提示一次：把已提示过的目录落盘，之后改用托盘菜单里的常驻入口，
-// 不再每次启动都弹窗打扰（此前只有进程内的 dshPathPrompted，重启就会再弹）。
-async function promptDshPathFix() {
-  const fix = dshCommandState?.needsPathFix ? dshCommandState : null
-  if (!fix || dshPathPrompted) return
-  dshPathPrompted = true
-  try {
-    if (dshPathState.promptedFor === fix.binDir) return
-    dshPathState = { ...dshPathState, promptedFor: fix.binDir }
-    await writePathFixState(dshPathStatePath(), dshPathState)
-    const { response } = await showMessageBox({
-      type: 'info',
-      title: 'dsh 命令还不能在终端里使用',
-      message: 'dsh 已经装好，但它的目录不在你的 PATH 上。',
-      detail: `${fix.binDir}\n\n加入后即可在自己的终端里执行 dsh plugin --profile web add ...。这个提示只会出现一次，之后可从托盘菜单选择「修复 dsh 命令（加入 PATH）」。`,
-      buttons: ['立即修复', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    })
-    if (response === 0) await applyDshPathFix()
-  } catch (error) {
-    console.warn('[dsh-path] unable to ask about PATH', error)
-  }
-}
-
-function createTrayContextMenu() {
-  const updateBusy = ['checking', 'downloading', 'installing'].includes(desktopUpdateState.status)
-  return Menu.buildFromTemplate([
-    {
-      label: '在默认浏览器中打开',
-      enabled: Boolean(harnessOrigin),
-      click: () => {
-        // Reuse the token-carrying launch URL so an external browser can
-        // complete its own authentication exchange when it has no cookie yet.
-        if (harnessOrigin) {
-          void shell.openExternal(harnessLaunchUrl ?? `${harnessOrigin}/`)
-        }
-      },
-    },
-    { type: 'separator' },
-    ...dshCommandMenuItems(),
-    {
-      label: desktopUpdateMenuLabel(),
-      enabled: !updateBusy,
-      click: () => {
-        if (desktopUpdateState.status === 'ready') void promptDesktopUpdate()
-        else void checkForDesktopUpdate({ manual: true })
-      },
-    },
-    { type: 'separator' },
-    { label: '重启', click: restartApplication },
-    { label: '退出', click: quitApplication },
-  ])
-}
-
-function createTray() {
-  if (tray) return
-
-  tray = new Tray(createTrayImage())
-  tray.setToolTip('DeepSeek Harness Desktop')
-
-  tray.on('click', showMainWindow)
-  tray.on('right-click', () => tray?.popUpContextMenu(createTrayContextMenu()))
-  nativeTheme.on('updated', updateTrayTheme)
-}
-
-// The window later loads the Harness Web UI, whose page code is delivered by
-// the auto-updated npm package. Deny every permission by default and allow
-// only clipboard writes that mirror user copy actions; this keeps third-party
-// page code from accessing the camera, microphone, notifications and other
-// system capabilities without an explicit product decision.
-function configureRendererPermissions() {
-  session.defaultSession.setPermissionRequestHandler(
-    (_webContents, permission, callback) => {
-      callback(isAllowedRendererPermission(permission))
-    },
-  )
-  session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission) => isAllowedRendererPermission(permission),
-  )
-}
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 900,
-    minWidth: 900,
-    minHeight: 640,
-    show: false,
-    autoHideMenuBar: process.platform === 'win32',
-    backgroundColor: '#0a0a0a',
-    title: 'DeepSeek Harness Desktop',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
+  state.tray = createTrayController({
+    brandDir: BRAND_DIR,
+    onShowWindow: showMainWindow,
+    providers: {
+      isOpenInBrowserEnabled: () => Boolean(state.launcher?.origin),
+      openInBrowser: openHarnessInBrowser,
+      dshCommandItems: () => state.dshCommand.menuItems(),
+      dshUpdateItem: () => state.dshUpdate.menuItem(),
+      desktopUpdateItem: () => state.desktopUpdate.menuItem(),
+      restart: restartApplication,
+      quit: quitApplication,
     },
   })
 
-  if (process.platform === 'win32') mainWindow.removeMenu()
-
-  mainWindow.once('ready-to-show', () => mainWindow.show())
-  mainWindow.webContents.on('context-menu', (_event, params) => {
-    const contextMenu = Menu.buildFromTemplate(
-      createWebContextMenuTemplate(params, {
-        copyText: (text) => clipboard.writeText(text),
-        openExternal: (url) => void shell.openExternal(url),
-      }),
-    )
-    contextMenu.popup({ window: mainWindow, x: params.x, y: params.y })
-  })
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!isAllowedLocalUrl(url)) {
-      event.preventDefault()
-      if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
-    }
-  })
-  mainWindow.on('close', (event) => {
-    if (isQuitting) return
-    event.preventDefault()
-    mainWindow.hide()
-  })
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
-
-  void startApplication()
+  windows.configurePermissions()
+  state.tray.create()
+  state.desktopUpdate.schedule()
+  state.dshUpdate.schedule()
+  // 窗口创建会触发一次启动流程（onWindowCreated → launcher.start()）。
+  windows.create()
 }
 
 const singleInstance = app.requestSingleInstanceLock()
@@ -1070,10 +155,7 @@ if (singleInstance) {
         ? Menu.buildFromTemplate(createApplicationMenuTemplate())
         : null
     Menu.setApplicationMenu(applicationMenu)
-    configureRendererPermissions()
-    createTray()
-    createWindow()
-    scheduleDesktopUpdates()
+    configureControllers()
   })
   app.on('activate', () => {
     showMainWindow()
@@ -1088,13 +170,13 @@ ipcMain.handle('retry-startup', async (event) => {
   if (!isTrustedIpcSender(event.senderFrame, LOADING_HTML_PATH)) {
     throw new Error('拒绝来自非启动页的重试请求。')
   }
-  await startApplication()
+  await state.launcher?.start()
 })
 
 app.on('before-quit', () => {
   isQuitting = true
-  if (desktopUpdateTimeout) clearTimeout(desktopUpdateTimeout)
-  if (desktopUpdateInterval) clearInterval(desktopUpdateInterval)
-  nativeTheme.removeListener('updated', updateTrayTheme)
-  stopHarness()
+  state.desktopUpdate?.dispose()
+  state.dshUpdate?.dispose()
+  state.tray?.dispose()
+  state.launcher?.stop()
 })

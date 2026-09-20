@@ -1,0 +1,243 @@
+.startup-trace {
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: rgb(6 8 13 / 78%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 7%),
+    0 36px 100px rgb(0 0 0 / 32%);
+  animation: enter-right 760ms 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.startup-trace::before {
+  content: "";
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  top: -190px;
+  right: -110px;
+  border-radius: 50%;
+  background: rgb(103 153 254 / 28%);
+  filter: blur(55px);
+}
+
+.trace-heading {
+  position: relative;
+  justify-content: space-between;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.trace-heading p {
+  margin-bottom: 6px;
+}
+
+.trace-heading h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.trace-heading > span {
+  color: rgb(255 255 255 / 34%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.stage-list {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage {
+  position: relative;
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: rgb(255 255 255 / 34%);
+  transition:
+    border-color 320ms ease,
+    background-color 320ms ease,
+    color 320ms ease,
+    transform 320ms ease;
+}
+
+.stage.is-current {
+  border-color: var(--border);
+  background: var(--surface);
+  color: #fff;
+  transform: translateX(-3px);
+}
+
+.stage.is-complete {
+  color: rgb(255 255 255 / 64%);
+}
+
+.stage.has-stage-error {
+  border-color: rgb(255 122 122 / 42%);
+  background: rgb(255 122 122 / 7%);
+  color: #fff; /* NOSONAR: 深色底上对比度约 19:1，Sonar 把半透明背景当成不透明粉色 */
+}
+
+.stage-index {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.stage.is-current .stage-index {
+  border-color: rgb(143 178 255 / 38%);
+  background: rgb(103 153 254 / 14%);
+  color: #b7ccff; /* NOSONAR: 深色底上对比度约 9:1，Sonar 把半透明背景当成不透明蓝色 */
+  box-shadow: 0 0 20px rgb(103 153 254 / 12%);
+}
+
+.stage.is-complete .stage-index::after {
+  content: "✓";
+  color: #aac3ff;
+  font-size: 12px;
+}
+
+.stage.is-complete .stage-index {
+  font-size: 0;
+}
+
+.stage-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.stage-copy strong {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.stage-detail {
+  overflow: hidden;
+  color: rgb(255 255 255 / 34%);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage.is-current .stage-detail {
+  color: var(--text-description);
+}
+
+.stage-state {
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.stage.is-current .stage-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  display: inline-block;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #91b1ff;
+  box-shadow: 0 0 8px #6799fe;
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.command-panel {
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 25%);
+}
+
+.command-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.command-tabs span {
+  padding: 8px 13px;
+  color: rgb(255 255 255 / 34%);
+  font-size: 10px;
+}
+
+.command-tabs .is-active {
+  border-right: 1px solid var(--border-soft);
+  background: rgb(255 255 255 / 5%);
+  color: var(--text-secondary);
+}
+
+.command-panel code {
+  display: block;
+  padding: 18px 16px;
+  color: rgb(255 255 255 / 58%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.command-panel code span {
+  margin-right: 10px;
+  color: #759eff;
+}
+
+.app-footer {
+  height: 56px;
+  gap: 12px;
+  border-top: 1px solid var(--border-soft);
+  color: rgb(255 255 255 / 28%);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  animation: enter-up 520ms 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.footer-separator {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 30%);
+}
+
+.has-error {
+  --brand: var(--error);
+}
+
+.has-error .status-led,
+.has-error .stage.is-current .stage-state::before {
+  background: var(--error);
+  box-shadow: 0 0 12px rgb(255 122 122 / 75%);
+}
+
+.has-error .progress-track::before,
+.has-error .progress-meter::-webkit-progress-value {
+  background: linear-gradient(90deg, #bd4d55, var(--error), #ffc0c0);
+  box-shadow: 0 0 15px rgb(255 122 122 / 74%);
+}
+
+.has-error .kicker span,
+.has-error .progress-labels {
+  color: #ffb1b1;
+}
+

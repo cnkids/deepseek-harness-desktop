@@ -75,8 +75,8 @@ test('finds a compatible system Node without probing a login shell', async () =>
   assert.equal(installation.source, 'system')
 })
 
-test('reuses an already installed managed runtime without system discovery', async () => {
-  if (process.platform === 'win32') return
+test('reuses an already installed managed runtime without system discovery', async (t) => {
+  if (process.platform === 'win32') return t.skip('假 node 是 POSIX shell 脚本，Windows 上跳过')
 
   const current = await inspectNodeInstallation(process.execPath, process.platform)
   assert.ok(current)
@@ -108,8 +108,8 @@ test('reuses an already installed managed runtime without system discovery', asy
   }
 })
 
-test('prefers a compatible system Node over an installed managed runtime', async () => {
-  if (process.platform === 'win32') return
+test('prefers a compatible system Node over an installed managed runtime', async (t) => {
+  if (process.platform === 'win32') return t.skip('假 node 是 POSIX shell 脚本，Windows 上跳过')
 
   const current = await inspectNodeInstallation(process.execPath, process.platform)
   assert.ok(current)
@@ -143,8 +143,8 @@ test('prefers a compatible system Node over an installed managed runtime', async
   }
 })
 
-test('keeps an explicit Node override ahead of a cached managed runtime', async () => {
-  if (process.platform === 'win32') return
+test('keeps an explicit Node override ahead of a cached managed runtime', async (t) => {
+  if (process.platform === 'win32') return t.skip('假 node 是 POSIX shell 脚本，Windows 上跳过')
 
   const current = await inspectNodeInstallation(process.execPath, process.platform)
   assert.ok(current)

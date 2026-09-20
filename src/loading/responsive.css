@@ -1,0 +1,129 @@
+@media (max-width: 900px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-header,
+  .startup-layout,
+  .app-footer {
+    width: min(100% - 40px, 720px);
+  }
+
+  .startup-layout {
+    height: auto;
+    min-height: calc(100vh - 128px);
+    grid-template-columns: 1fr;
+    gap: 42px;
+    padding: 64px 0;
+  }
+
+  .startup-copy {
+    max-width: 620px;
+  }
+
+  h1 {
+    font-size: clamp(46px, 10vw, 68px);
+  }
+
+  .startup-trace {
+    width: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .app-header,
+  .startup-layout,
+  .app-footer {
+    width: calc(100% - 40px);
+  }
+
+  .app-header {
+    height: 60px;
+  }
+
+  .brand-wordmark {
+    width: 124px;
+    height: auto;
+  }
+
+  .brand-pill {
+    padding: 4px 10px;
+    font-size: 10px;
+  }
+
+  .header-meta {
+    display: none;
+  }
+
+  .startup-layout {
+    min-height: calc(100vh - 108px);
+    gap: 36px;
+    padding: 56px 0 44px;
+  }
+
+  .kicker {
+    font-size: 12px;
+  }
+
+  h1 {
+    margin-top: 16px;
+    font-size: clamp(43px, 12vw, 56px);
+  }
+
+  #detail {
+    margin-top: 24px;
+    font-size: 14px;
+  }
+
+  .progress-region {
+    margin-top: 38px;
+  }
+
+  .startup-trace {
+    padding: 20px;
+  }
+
+  .stage {
+    grid-template-columns: 38px 1fr;
+  }
+
+  .stage-state {
+    display: none;
+  }
+
+  .privacy-note {
+    font-size: 11px;
+  }
+
+  .app-footer {
+    height: 48px;
+    justify-content: space-between;
+  }
+
+  .footer-separator,
+  #runtime-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .canvas-grid-layer {
+    display: none;
+  }
+
+  .hero-particle-layer {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+

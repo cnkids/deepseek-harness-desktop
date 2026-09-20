@@ -130,6 +130,24 @@ test('passes the resolved registry to npm through the environment', skipOnWindow
   assert.match(log, /registry=https:\/\/registry\.npmmirror\.com/)
 })
 
+// 安全守卫：版本号来自软件源，必须在拼进 npm 安装参数之前再次校验，非法值直接拒绝。
+test('rejects a version that is not valid semver before calling npm', skipOnWindows, async () => {
+  const runtime = await createFakeRuntime()
+
+  await assert.rejects(
+    updateGlobalDsh({
+      nodeEnvironment: runtime.nodeEnvironment,
+      version: '1.2.3 || rm -rf /',
+      platform: 'linux',
+      env: runtime.env,
+    }),
+    /无效的 Harness 版本号/,
+  )
+
+  const log = await readFile(runtime.logPath, 'utf8').catch(() => '')
+  assert.equal(log.includes('install'), false, 'npm 不该被调用')
+})
+
 test('rejects packages that are not dsh or have no usable bin entry', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dsh-package-'))
 
