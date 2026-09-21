@@ -248,7 +248,10 @@ test('replaces the current AppImage in place and relaunches', async () => {
     await harness.controller.check({ manual: true })
 
     assert.equal(await readFile(currentAppImage, 'utf8'), 'installer-bytes')
-    assert.equal((await stat(currentAppImage)).mode & 0o111, 0o111, '新 AppImage 必须可执行')
+    if (process.platform !== 'win32') {
+      // Windows 文件系统没有 POSIX 权限位，stat().mode 里读不到可执行位。
+      assert.equal((await stat(currentAppImage)).mode & 0o111, 0o111, '新 AppImage 必须可执行')
+    }
     assert.deepEqual(harness.calls.at(-1), ['quit'])
     assert.equal(
       harness.calls.some(([name, options]) => name === 'relaunch' && options?.execPath === currentAppImage),

@@ -15,9 +15,11 @@ const installation = {
   binDir: path.join('/npm', 'bin'),
 }
 
-// 假 PATH：只包含 /usr/bin，因此 /npm/bin 视为"不在 PATH 上"。
-const PATH_WITHOUT_DSH = '/usr/bin'
-const PATH_WITH_DSH = ['/npm/bin', '/usr/bin'].join(path.delimiter)
+// 假 PATH：只包含系统目录，因此 dsh 的 binDir 视为"不在 PATH 上"。
+// 路径与分隔符都按宿主平台构造：Windows 上 binDir 是 `\npm\bin`，
+// 用 POSIX 风格的 `/npm/bin` 永远匹配不上，测的就不是真实语义了。
+const PATH_WITHOUT_DSH = path.join(path.sep, 'usr', 'bin')
+const PATH_WITH_DSH = [installation.binDir, PATH_WITHOUT_DSH].join(path.delimiter)
 
 function createHarness({ responses = [], pathValue = PATH_WITHOUT_DSH } = {}) {
   const dialogs = []
