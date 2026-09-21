@@ -288,11 +288,6 @@ npm run release -- 0.3.0
 
 ## 版本记录
 
-### 0.3.1
-
-- 修复 Windows 上 CI 与发布构建失败：三条测试断言写成了平台相关（AppImage 的可执行位在 Windows 文件系统上不存在；`PATH` 用 POSIX 风格 `/npm/bin` 构造，Windows 上真实的 `\npm\bin` 因此匹配不上），现在按宿主平台构造并与平台语义对齐。**产品代码无改动**——真机上 `dsh` 的 `binDir` 与 `PATH` 都是原生分隔符，判定逻辑本身正确（`src/dsh-path.mjs` 早有 win32 语义的单测覆盖）。
-- 0.3.0 的 tag 已存在但未产出 Release（Windows 构建在 `npm test` 步骤失败，发布任务因此被跳过），首个正式发布版本为 0.3.1。
-
 ### 0.3.0
 
 - 新增 **Harness 更新检测与提示**：此前 `@deepseek-ai/dsh` 的新版本只在启动那一刻被静默安装，应用一旦常驻不重启就再也不知道有新版本、也没有手动更新入口。现在启动时发现新版本会询问一次（「立即更新」/「稍后」，也可选择先用当前版本启动），应用常驻期间每 6 小时复查一次，托盘常驻「检查 Harness 更新（当前 vX）」入口，有新版本时变成「更新 Harness 到 vY」。
@@ -301,6 +296,7 @@ npm run release -- 0.3.0
 - 安全加固：软件源版本号必须通过 semver 校验后才会进入 npm 安装参数（纵深防御，`updateGlobalDsh` 也会再校验一次）；`DSH_DESKTOP_NPM_REGISTRY` 与 `DSH_DESKTOP_NODE_MIRROR` 只接受 `https://`（本机 http 私有源例外），非法值忽略并回退官方源；日志与启动页展示源地址时只显示主机名，不再带出 URL 里的账号密码；**日志与出错信息统一脱敏**（`src/redaction.mjs`）：dsh 启动行里的本机访问令牌只以 `token=***` 落日志（启动流程内部仍拿原文去加载页面），出错信息里的软件源凭据也会被去掉；Windows 下的 `taskkill` / `where` 改用 `SystemRoot\System32` 下的绝对路径（且 `SystemRoot` 必须是绝对路径，否则回退命令名而不是从当前工作目录解析），避免 PATH 或相对路径劫持；解压私有 Node.js 运行时新增条目数与解压体积上限，写盘前就拒绝解压炸弹；更新能力只由主进程驱动，不新增任何渲染进程可达的 IPC 通道（preload 仍只暴露 `onStatus` 与 `retry`）。
 - 模块拆分（每个功能模块 ≤300 行，行为不变）：`main.mjs`（1100 行）拆为 `window.mjs`、`tray.mjs`、`harness-launcher.mjs`、`harness-process.mjs`、`harness-environment.mjs`、`dsh-command.mjs`、`updates/*`；`node-runtime.mjs`（522 行）拆为 `node/*`；启动页的 `background.js`、`hero-whale.js`、`loading.css` 也按职责拆分。
 - 新增 86 个单元测试与静态回归守卫（更新决策、只提示一次、先停后装、失败冷却、检查失败与更新失败的区分、离线时不谎称"已是最新版本"、不向渲染进程暴露更新能力、软件源协议与版本号校验、解压上限、桌面端更新各平台安装分支、日志与令牌脱敏、模块导入图静态校验），测试总数 91 → 177；Windows 专属用例改用测试上下文的 `t.skip()` 而不是提前 `return`。
+- 修复 Windows 上 CI 与发布构建失败：三条测试断言写成了平台相关（AppImage 的可执行位在 Windows 文件系统上不存在；`PATH` 用 POSIX 风格 `/npm/bin` 构造，Windows 上真实的 `\npm\bin` 因此匹配不上），现已按宿主平台构造。**产品代码无改动**——真机上 `dsh` 的 `binDir` 与 `PATH` 都是原生分隔符，判定逻辑本身正确（`src/dsh-path.mjs` 早有 win32 语义单测覆盖）。
 
 ### 0.2.8
 
