@@ -112,7 +112,7 @@ npm start
 
 | 功能 | 说明 |
 | --- | --- |
-| 一键启动 | 自动运行 `@deepseek-ai/dsh web`，无需手动使用终端 |
+| 一键启动 | 自动运行 `@deepseek-ai/dsh --profile web`，无需手动使用终端 |
 | 环境自适应 | 优先使用兼容的系统 Node.js，`dsh` 因此装进你自己的全局 npm 环境；没有兼容的才安装应用私有 runtime |
 | 网络自适应 | 初始化默认走官方源，探测不通时自动回退国内镜像，也可用环境变量指定私有源 |
 | 安全校验 | 下载的 Node.js 官方归档通过固定 SHA-256 校验后才会安装 |
@@ -152,6 +152,8 @@ npm start
 ```
 
 托管 runtime 位于 Electron 的 `userData` 目录。桌面端不会覆盖 `DSH_HOME`：默认与命令行共用 `~/.dsh`，因此通过 `dsh plugin --profile web add ...` 安装的插件会在桌面端下次启动时生效（安装后需要重启应用）；如果启动环境显式设置了 `DSH_HOME`，桌面端会原样继承。
+
+桌面端启动 Harness 时**显式传入 `--profile web`**，而不是依赖默认解析：`web` 是 CLI 管理的常规 profile，官方桌面端保留的 `desktop` 名字由它自己的 Electron 应用独占管理（CLI 直接执行 `dsh --profile desktop` 会报错），两者因此彻底解耦。桌面端默认永远落在 `web` 上，与你在终端里 `dsh plugin --profile web add ...` 维护的是同一个 profile、同一套插件。高级用户若想用其他通过 CLI 维护的 profile，可设置 `DSH_DESKTOP_PROFILE` 指定名称（只接受普通标识符，非法值回退到 `web`）。
 
 本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。这种情况按下一节自行安装一份兼容的 Node.js，应用就会把 `dsh` 装进你的全局 npm 环境。
 
@@ -255,9 +257,11 @@ npm start
 | `DSH_DESKTOP_DSH` | 指定 `dsh` 可执行文件路径 |
 | `DSH_DESKTOP_NODE_MIRROR` | 覆盖 Node.js 下载源，会排在官方源之前优先尝试 |
 | `DSH_DESKTOP_NPM_REGISTRY` | 覆盖 npm registry，会排在官方源之前优先尝试 |
+| `DSH_DESKTOP_PROFILE` | 指定启动的 profile 名称（默认 `web`；只接受普通标识符，非法值回退到 `web`） |
 
 ```sh
 DSH_DESKTOP_NODE=/absolute/path/to/node npm start
+DSH_DESKTOP_PROFILE=web-fresh npm start
 ```
 
 完整环境变量说明见[国内网络环境](#国内网络环境)。
@@ -279,14 +283,23 @@ CI 会在 macOS、Windows、Linux 三个平台各跑一遍 `npm test`，因此**
 维护者在干净且已同步的 `main` 分支运行：
 
 ```sh
-npm run release -- 0.3.0
+npm run release -- 0.3.1
 ```
 
-脚本会更新版本、运行测试、创建 release commit 和 `v0.3.0` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要、写出自动更新清单 `latest.json` 并创建 GitHub Release。
+脚本会更新版本、运行测试、创建 release commit 和 `v0.3.1` tag，再推送到 GitHub。发布工作流随后在原生 runner 上构建各平台安装包、生成 SHA-256 摘要、写出自动更新清单 `latest.json` 并创建 GitHub Release。
+
+> 注意：仓库里曾经存在一个指向中间提交的过期 `v0.3.1` tag（对应"Windows 断言修复"并入 0.3.0 之前的中间态）。0.3.1 作为正式版本发布前，请先把该 tag 移到新提交并强推：`git push origin --force v0.3.1`（它从未生成过 Release，强制覆盖是安全的）。
 
 完整配置与发布流程见[发布说明](docs/releasing.md)。
 
 ## 版本记录
+
+### 0.3.1
+
+- 桌面端启动 Harness 时改为**显式传入 `--profile web`**，不再依赖默认解析：`web` 是 CLI 管理的常规 profile，官方桌面端保留的 `desktop` 名字由它自己的 Electron 应用独占管理（CLI 直接执行 `dsh --profile desktop` 会报错），两者因此彻底解耦。桌面端默认永远落在 `web` 上，与你在终端里 `dsh plugin --profile web add ...` 维护的是同一个 profile、同一套插件。
+- 新增 `DSH_DESKTOP_PROFILE` 环境变量：高级用户可借此指向自己通过 CLI 维护的任意常规 profile；profile 名会拼进启动命令，因此只接受普通标识符（`[A-Za-z0-9_.-]`），非法值或未设置一律回退到 `web`，不会把额外参数塞进启动命令行。具备同款用途的既有覆盖变量是 `DSH_DESKTOP_NODE` / `DSH_DESKTOP_DSH`。
+- 启动页的命令展示由 `dsh web` 同步为 `dsh --profile web`，与真实启动命令保持一致。
+- 新增单元测试：显式 profile 参数构造、自定义 profile、非法值回退与标识符校验（`buildHarnessLaunchArgs` / `isValidHarnessProfile` / `resolveHarnessProfileName`），测试总数 177 → 183；SonarQube 新代码覆盖率 100%、新增问题 0、重复率 0%，质量门通过。
 
 ### 0.3.0
 

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { createHarnessLauncher } from '../src/harness-launcher.mjs'
+import { createHarnessLauncher, resolveHarnessProfileName } from '../src/harness-launcher.mjs'
 import { findCompatibleSystemNode } from '../src/node-runtime.mjs'
 import { readStartupCache } from '../src/startup-cache.mjs'
 
@@ -169,6 +169,20 @@ test('surfaces the error dsh printed when the harness cannot start', async () =>
   } finally {
     await fixtures.cleanup()
   }
+})
+
+test('resolves the launch profile to CLI-managed web by default', () => {
+  // 桌面端不占用官方端保留的 desktop 名字，默认永远落在 CLI 可管理的 web。
+  assert.equal(resolveHarnessProfileName(), 'web')
+  assert.equal(resolveHarnessProfileName(undefined), 'web')
+})
+
+test('honours an explicit DSH_DESKTOP_PROFILE and rejects invalid values', () => {
+  assert.equal(resolveHarnessProfileName('web-fresh'), 'web-fresh')
+  assert.equal(resolveHarnessProfileName('my_work.1'), 'my_work.1')
+  // 非法 profile 回退到 web，不会把额外参数塞进启动命令。
+  assert.equal(resolveHarnessProfileName('two words'), 'web')
+  assert.equal(resolveHarnessProfileName(''), 'web')
 })
 
 // 更新/安装完成后要把新的安装写回启动缓存：否则下次启动仍从缓存读到旧版本号，

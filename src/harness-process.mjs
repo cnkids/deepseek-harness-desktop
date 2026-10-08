@@ -24,14 +24,32 @@ export function appendProcessOutput(stream, channel, onLine) {
   })
 }
 
-// dsh web 的启动命令固定为 `dsh web --no-open --port <port>`：桌面端自己加载
-// Web UI，所以不让 dsh 打开系统浏览器。
+// 桌面端启动 dsh 时显式传 `--profile web`，而不是依赖默认解析：`web` 是 CLI
+// 管理的常规 profile，`desktop` 这个保留名由官方 Electron 端独占（CLI 直接
+// `dsh --profile desktop` 会报错），显式指定后桌面端与官方端彻底解耦。命令固定
+// 为 `dsh --profile web --no-open --port <port>`：桌面端自己加载 Web UI，所以
+// 不让 dsh 打开系统浏览器。
+export const DEFAULT_HARNESS_PROFILE = 'web'
+
+// profile 名会拼进命令行参数：只放行普通标识符，防止外部设置往参数里塞额外内容。
+const HARNESS_PROFILE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
+
+export function isValidHarnessProfile(profile) {
+  return typeof profile === 'string' && HARNESS_PROFILE_PATTERN.test(profile)
+}
+
+export function buildHarnessLaunchArgs(binPath, { port, profile = DEFAULT_HARNESS_PROFILE } = {}) {
+  const resolvedProfile = isValidHarnessProfile(profile) ? profile : DEFAULT_HARNESS_PROFILE
+  return [binPath, '--profile', resolvedProfile, '--no-open', '--port', String(port)]
+}
+
 export function spawnHarness({
   nodePath,
   binPath,
   port,
   cwd,
   env,
+  profile = DEFAULT_HARNESS_PROFILE,
   onStdoutLine,
   onStderrLine,
   onError,
@@ -39,7 +57,7 @@ export function spawnHarness({
 }) {
   const child = spawn(
     nodePath,
-    [binPath, 'web', '--no-open', '--port', String(port)],
+    buildHarnessLaunchArgs(binPath, { port, profile }),
     {
       cwd,
       env,

@@ -11,7 +11,7 @@ import {
   resolveWorkspacePath,
   startupCachePath,
 } from './harness-environment.mjs'
-import { spawnHarness, stopHarnessProcess } from './harness-process.mjs'
+import { spawnHarness, stopHarnessProcess, isValidHarnessProfile, DEFAULT_HARNESS_PROFILE } from './harness-process.mjs'
 
 const STARTUP_TIMEOUT_MS = 10 * 60_000
 // 启动失败时用于回溯原因的 dsh 输出行数上限。
@@ -20,6 +20,15 @@ const HARNESS_OUTPUT_LIMIT = 200
 // 显式指定了 Node.js 或 dsh 时说明用户在排查/开发，缓存会掩盖真实环境，跳过。
 function shouldUseStartupCache() {
   return !process.env.DSH_DESKTOP_NODE && !process.env.DSH_DESKTOP_DSH
+}
+
+// 启动哪个 profile：默认 CLI 管理的 web，绕开官方桌面端保留的 desktop 名字。
+// 高级用户可用 DSH_DESKTOP_PROFILE 指向自己通过 CLI 维护的任意常规 profile；
+// 非法值回退到 web，不会把额外参数塞进启动命令。
+export function resolveHarnessProfileName(profileFromEnv = process.env.DSH_DESKTOP_PROFILE) {
+  return profileFromEnv && isValidHarnessProfile(profileFromEnv)
+    ? profileFromEnv
+    : DEFAULT_HARNESS_PROFILE
 }
 
 // Harness 启动编排：环境解析 → 启动缓存 → 版本准备（交给 dsh 更新控制器）→
@@ -156,7 +165,7 @@ export function createHarnessLauncher({
       })
   }
 
-  function startHarnessProcess(port, workspacePath, harnessEnvironment) {
+  function startHarnessProcess(port, workspacePath, harnessEnvironment, profile) {
     // 保留最近的子进程输出：启动失败时要把 dsh 真正报的错带到启动页，
     // 否则用户只能看到“进程意外退出（代码 1）”。
     const output = []
@@ -169,6 +178,7 @@ export function createHarnessLauncher({
       nodePath: nodeEnvironment.nodePath,
       binPath: installed.binPath,
       port,
+      profile,
       cwd: workspacePath,
       env: harnessEnvironment,
       onStdoutLine: (line) => {
@@ -215,10 +225,11 @@ export function createHarnessLauncher({
     const url = `http://127.0.0.1:${port}`
     const workspacePath = await resolveWorkspacePath(app)
     const harnessEnvironment = buildHarnessEnvironment(nodeEnvironment, [installed.binDir])
+    const profile = resolveHarnessProfileName()
     await dshCommand.loadState()
     await dshCommand.refresh(nodeEnvironment, installed)
 
-    const session = startHarnessProcess(port, workspacePath, harnessEnvironment)
+    const session = startHarnessProcess(port, workspacePath, harnessEnvironment, profile)
     child = session.process
 
     reportStatus({
