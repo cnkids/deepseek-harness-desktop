@@ -157,6 +157,10 @@ npm start
 
 本机没有系统 Node.js 时，`dsh` 只存在于应用私有 runtime 里，不在你自己终端的 `PATH` 上，直接敲 `dsh` 会提示命令不存在。这种情况按下一节自行安装一份兼容的 Node.js，应用就会把 `dsh` 装进你的全局 npm 环境。
 
+### 自定义 Agent 预设分发
+
+仓库里带一份可携带的自定义 Agent 预设包 [`portable-agent-presets/`](portable-agent-presets/)，包含两个预设（标准模式（中文回复）、测试架构师）与「一键安装」脚本。要把预设带到其它电脑或分发给别人：把该目录整个拷贝到目标机，运行 `bash install.sh`（Windows 用 `install.ps1`），脚本会自动完成 素材复制 + 声明接线 + 旧包名修复，全程无需改代码或重新打包；幂等可重复执行，改动前自动备份。用法详见包内 [`README.md`](portable-agent-presets/README.md)。
+
 ### 在自己的终端里使用 dsh
 
 应用**优先使用兼容的系统 Node.js**，并把 `@deepseek-ai/dsh` 装进你自己的 npm 全局环境（Windows 通常是 `%APPDATA%\npm`，POSIX 是 npm 全局前缀下的 `bin`）。本机有兼容的 Node.js 时，`dsh` 就应该能直接在终端里使用。
